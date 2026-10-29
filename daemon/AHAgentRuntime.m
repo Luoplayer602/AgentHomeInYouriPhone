@@ -1,5 +1,7 @@
 #import "AHAgentRuntime.h"
 #import "AHActivityLease.h"
+#import "AHModelLimits.h"
+#import "AHHistory.h"
 #import "../app/AHProvider.h"
 #import "../app/AHProviderConfig.h"
 #import "../app/AHProfiles.h"
@@ -55,13 +57,20 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         if([self rows:@"SELECT id FROM compactions WHERE conversation_id=? AND state='running'" values:@[conversation]].count) { *error=@"Đang compact hội thoại; vui lòng chờ hoặc bỏ snapshot."; return nil; }
         NSString *urlError=nil; NSURL *url=[config[@"endpoint"] isKindOfClass:NSString.class]?AHChatURL(config[@"endpoint"],&urlError):nil;
         if(!url || ![config[@"id"] isKindOfClass:NSString.class] || ![config[@"model"] isKindOfClass:NSString.class] || ![config[@"model"] length]) { *error=urlError ?: @"Invalid provider"; return nil; }
-        NSDictionary *snapshot=@{@"id":config[@"id"],@"endpoint":url.absoluteString,@"model":config[@"model"],@"disableStreaming":@([config[@"disableStreaming"] boolValue]),@"context_window_tokens":@([config[@"context_window_tokens"] integerValue]),@"max_output_tokens":@([config[@"max_output_tokens"] respondsToSelector:@selector(integerValue)] ? MAX(256,MIN(32768,[config[@"max_output_tokens"] integerValue])):8192)};
+        NSDictionary *limits=AHModelLimits(config);
+        NSMutableDictionary *snapshot=[@{@"id":config[@"id"],@"endpoint":url.absoluteString,@"model":config[@"model"],@"disableStreaming":@([config[@"disableStreaming"] boolValue]),@"context_window_tokens":@([config[@"context_window_tokens"] integerValue]),@"max_output_tokens":@([config[@"max_output_tokens"] respondsToSelector:@selector(integerValue)] ? MAX(256,MIN(32768,[config[@"max_output_tokens"] integerValue])):8192)} mutableCopy];
+        snapshot[@"max_output_tokens"]=limits[@"output_tokens"];
+        snapshot[@"context_window_tokens"]=limits[@"window_tokens"];
+        snapshot[@"input_budget_tokens"]=limits[@"input_budget_tokens"];
+        snapshot[@"context_source"]=limits[@"source"];
         BOOL ok=[self sql:@"BEGIN IMMEDIATE" values:@[]];
         if(ok) ok=[self sql:@"INSERT INTO tasks(id,conversation_id,tool) VALUES (?,?,'chat.ai')" values:@[identifier,conversation]];
         if(ok) ok=[self sql:@"INSERT INTO messages(role,content,conversation_id) VALUES ('user',?,?)" values:@[text,conversation]];
         NSDictionary *summary=[self rows:@"SELECT id,end_id,summary FROM compactions WHERE conversation_id=? AND state='active' LIMIT 1" values:@[conversation]].firstObject;
-        NSArray *history=[[[self rows:@"SELECT role,content FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 100" values:@[conversation,summary[@"end_id"] ?: @"0"]] reverseObjectEnumerator] allObjects];
-        NSMutableArray *context=AHPromptContext(history,summary[@"summary"],snapshot[@"model"]);
+        NSArray *history=AHHistory(self.db,conversation,summary[@"end_id"] ?: @"0");
+        NSDictionary *plan=AHPromptPlan(history,summary[@"summary"],snapshot[@"model"],[limits[@"input_budget_tokens"] unsignedIntegerValue]);
+        if(![plan[@"recent_count"] unsignedIntegerValue]) { [self sql:@"ROLLBACK" values:@[]]; *error=@"Tin nhắn vượt ngân sách input; tăng context window hoặc rút gọn nội dung."; return nil; }
+        NSMutableArray *context=[plan[@"messages"] mutableCopy];
         if(ok) ok=[self sql:@"INSERT INTO ai_runs(task_id,config,context) VALUES (?,?,?)" values:@[identifier,json(snapshot),json(context)]];
         NSString *title=[[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject]; if(title.length>60) title=[title substringToIndex:60];
         if(ok) ok=[self sql:@"UPDATE conversations SET title=CASE WHEN title='Hội thoại mới' THEN ? ELSE title END,accessed_at=(julianday('now')-2440587.5)*86400 WHERE id=?" values:@[title,conversation]];
@@ -108,6 +117,9 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
 - (void)request {
     NSString *key=self.activeKey;
     if(!key.length) { [self finish:@"failed" error:@"Daemon không đọc được API key khi bắt đầu lượt. Mở khóa thiết bị rồi gửi lại." answer:nil]; return; }
+    NSData *payload=[NSJSONSerialization dataWithJSONObject:@{@"messages":self.context,@"tools":@[AHSystemInfoTool()]} options:0 error:nil];
+    NSUInteger ceiling=[self.config[@"input_budget_tokens"] unsignedIntegerValue];
+    if(ceiling && (payload.length+2)/3+self.context.count*8>ceiling) { [self finish:@"failed" error:@"Tool context vượt ngân sách input. Compact hoặc tăng context window trước lượt tiếp theo." answer:nil]; return; }
     NSString *identifier=self.activeID; self.provider=[AHProvider new];
     self.provider.maxOutputTokens=[self.config[@"max_output_tokens"] unsignedIntegerValue] ?: 8192;
     __weak AHAgentRuntime *weakSelf=self;

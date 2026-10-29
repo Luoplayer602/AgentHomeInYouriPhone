@@ -35,8 +35,8 @@ create('two','a','one');ready('two');activate('two','a')
 assert db.execute("SELECT id FROM compactions WHERE conversation_id='a' AND state='active'").fetchall()==[('two',)]
 create('other','b');ready('other');activate('other','b')
 # Boundary used by the real runtime: retained recent messages remain separate.
-runtime=Path('daemon/AHAgentRuntime.m').read_text()
-query=re.search(r'@"(SELECT role,content FROM messages WHERE conversation_id=\? AND id>\? ORDER BY id DESC LIMIT 100)"',runtime).group(1)
+runtime=Path('daemon/AHHistory.h').read_text()
+query=re.search(r'"(SELECT role,content FROM messages WHERE conversation_id=\? AND id>\? ORDER BY id DESC)"',runtime).group(1)
 assert len(db.execute(query,('a',6)).fetchall())==4
 # Failed activation transaction must keep prior active state.
 try:

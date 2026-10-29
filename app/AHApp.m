@@ -149,8 +149,8 @@
     double window=[context[@"window_tokens"] doubleValue];
     BOOL estimated=window>0 && context[@"estimated_input_tokens"]!=nil;
     double percent=estimated?([context[@"estimated_input_tokens"] doubleValue]+[context[@"output_tokens"] doubleValue])*100/window:[context[@"characters"] doubleValue]*100/AHContextBudget;
-    [self.contextButton setTitle:[NSString stringWithFormat:estimated?@"◉ ~%.0f%%":@"◉ C%.0f%%",percent] forState:UIControlStateNormal];
-    self.contextButton.accessibilityLabel=estimated?@"Ước lượng token input và output dự phòng so với window khai báo":@"Ngân sách ký tự app; window model chưa khai báo";
+    [self.contextButton setTitle:[NSString stringWithFormat:estimated?@"◉ ~%.0f%%":@"◉ …",percent] forState:UIControlStateNormal];
+    self.contextButton.accessibilityLabel=estimated?@"Ước lượng token input và output dự phòng so với context window; xem nguồn trong Context":@"Ngân sách ký tự app; window model chưa khai báo";
     self.contextButton.tintColor=percent>=90?UIColor.systemOrangeColor:UIColor.systemBlueColor;
     [self.chat reloadData];
     NSInteger rows = self.messages.count + (self.draft.length ? 1 : 0);

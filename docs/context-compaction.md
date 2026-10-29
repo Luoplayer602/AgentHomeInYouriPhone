@@ -1,10 +1,20 @@
 # Context window và compact — yêu cầu phải giữ cho các bản tiếp theo
 
-Từ 0.9.0 đã có compact thủ công với preview/activate/discard trên app và web. Auto-compact chưa triển khai. 16.000 ký tự vẫn là ngân sách app, không phải window thực của model.
+Từ 0.10.0, request chat dùng ngân sách token theo model, thay giới hạn 16.000 ký tự và 100 tin. Compact thủ công vẫn có preview/activate/discard trên app và web. Auto-compact chưa triển khai.
 
-## Hiện trạng
+## Hiện trạng 0.10.0
 
-AHContextSnapshot là nguồn chung cho UI và request: chọn các tin gần nhất trong ngân sách 16.000 ký tự UTF-16. Daemon trả tổng số tin của hội thoại để hiển thị cả phần nằm ngoài số tin tải lên. AHPromptContext dùng chung giữa dựng request và ước lượng. Có window do người dùng khai báo, output reservation và ước lượng UTF-8 bytes/4 gồm system/tool schema. Chưa có tokenizer đúng model. Usage thực được lưu khi provider trả về (API chat cuối). Tool outputs được thêm trong runtime nhưng ước lượng lượt tiếp chưa tính các output tương lai.
+- Thứ tự nhận diện: ghi đè context trong profile > metadata API cùng endpoint > catalog theo host + model ID chính xác > ngân sách dự phòng app 32.768 token. Context bằng 0 nghĩa là tự nhận diện. Alias gateway không được suy diễn thành model upstream.
+- Compatible: GET `/models`, chọn đúng `id`, đọc context_length/context_window/max_model_len hoặc limit.context, cùng input/output riêng khi có. Gemini dùng models.get và inputTokenLimit/outputTokenLimit; áp dụng ngân sách chung bảo thủ. Không chuyển API key qua redirect. Metadata không chứa key được cache trong RAM, làm mới tối đa mỗi 5 phút; restart sẽ nhận diện lại.
+- Catalog models.dev được đóng gói cho OpenAI, Google, DeepSeek và OpenRouter (468 model ở snapshot 2026-10-30). Script `scripts/update-model-limits.py` tái tạo từ JSON công khai. API metadata có ưu tiên hơn snapshot.
+- Ngân sách input = min(window − output − reserve, input ceiling nếu có). Reserve = max(1.024, 5% window). Output không vượt giới hạn model đã biết, cấu hình người dùng và 1/4 window. Ví dụ window 200.000, output 8.192: input 181.808 token.
+- AHPromptPlan dùng JSON UTF-8 bytes / 3 + overhead mỗi message, gồm system, tools và summary. Đây là ước lượng, chưa phải tokenizer đúng model. UI native/web hiển thị cùng nguồn và ngân sách. Usage thực API được giữ riêng.
+- Lịch sử request đọc cursor từ SQLite, giới hạn RAM 4 MiB nội dung, không giới hạn số tin. UI vẫn chỉ tải 100 tin để hiển thị; không giới hạn context gửi model. Tin cuối quá lớn sẽ bị từ chối rõ ràng. Tool rounds kiểm tra lại ngân sách trước request.
+- Compact hiện vẫn giữ cap 200 tin / 96K ký tự nguồn / 6K ký tự summary; bước tiếp theo cần chuyển compact sang ngân sách token và eval chất lượng giữ thông tin. Các cap này không áp vào lịch sử chat thông thường.
+
+Tham khảo semantics của [Cline model catalog](https://github.com/cline/cline/blob/main/sdk/packages/llms/src/catalog/README.md): tách context/input/output của model với ngân sách request. [Gemini models.get](https://ai.google.dev/api/models#method:-models.get) cung cấp inputTokenLimit/outputTokenLimit. Không xem một con số context lớn là bằng chứng model nhớ chính xác mọi thông tin.
+
+Định hướng đã thống nhất: bám theo kiến trúc agent hiện có, ưu tiên Cline cho metadata/context và vòng tool; mỗi bước vẫn cần kiểm tra phù hợp iPhone và provider thực. Tiếp theo: tokenizer/usage calibration → compact theo ngân sách → auto-compact tùy chọn có checkpoint/recovery → eval khả năng giữ mục tiêu, ràng buộc và tool state.
 
 ## Triển khai compact sau runtime
 

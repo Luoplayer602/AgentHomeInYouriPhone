@@ -26,7 +26,7 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
     NSDictionary *profile=nil; for(NSDictionary *p in AHProfiles()) if([p[@"id"] isEqual:self.identifier]) profile=p;
     self.type=profile[@"type"] ?: self.type ?: @"compatible"; self.identifier=self.identifier ?: NSUUID.UUID.UUIDString;
     BOOL gemini=[self.type isEqual:@"gemini"];
-    self.labels=gemini?@[@"Provider name",@"Model ID",@"Context window tokens (0 = chưa biết)",@"Max output tokens",@"API key"]:@[@"Provider name",@"Base URL",@"Model ID",@"Context window tokens (0 = chưa biết)",@"Max output tokens",@"API key"];
+    self.labels=gemini?@[@"Provider name",@"Model ID",@"Context window tokens (0 = tự nhận diện)",@"Max output tokens",@"API key"]:@[@"Provider name",@"Base URL",@"Model ID",@"Context window tokens (0 = tự nhận diện)",@"Max output tokens",@"API key"];
     NSString *limit=[profile[@"max_output_tokens"] description] ?: @"8192", *window=[profile[@"context_window_tokens"] description] ?: @"0";
     NSArray *values=gemini?@[profile[@"name"]?:@"",profile[@"model"]?:@"",window,limit,@""]:@[profile[@"name"]?:@"",profile[@"endpoint"]?:@"",profile[@"model"]?:@"",window,limit,@""];
     NSMutableArray *fields=[NSMutableArray array];
@@ -42,7 +42,7 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.fields.count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return [self.type isEqual:@"gemini"]?@"GEMINI":@"OPENAI COMPATIBLE"; }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return [self.type isEqual:@"gemini"]?@"Dùng Google AI Studio API key. Endpoint Gemini được cấu hình sẵn. Key lưu riêng trong Keychain.":@"Nhập base URL hoặc endpoint chat/completions. Key lưu riêng trong Keychain."; }
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return [self.type isEqual:@"gemini"]?@"Dùng Google AI Studio API key. Endpoint Gemini được cấu hình sẵn. Key lưu riêng trong Keychain. Context 0: tự nhận diện khi mở chat; xem nguồn trong Context. Nếu gateway không trả giới hạn, nhập số token model hỗ trợ (ví dụ 200000).":@"Nhập base URL hoặc endpoint chat/completions. Key lưu riêng trong Keychain. Context 0: tự nhận diện khi mở chat; xem nguồn trong Context. Nếu gateway không trả giới hạn, nhập số token model hỗ trợ (ví dụ 200000)."; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil]; cell.selectionStyle=UITableViewCellSelectionStyleNone;
     UILabel *label=[UILabel new]; label.text=self.labels[path.row]; label.textColor=UIColor.secondaryLabelColor; label.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -57,7 +57,7 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
     BOOL gemini=[self.type isEqual:@"gemini"];
     NSString *name=values[0], *model=values[gemini?1:2], *key=values.lastObject;
     NSString *limit=values[values.count-2], *window=values[values.count-3];
-    if(!window.length || [window rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location!=NSNotFound || window.integerValue<0 || window.integerValue>2000000) { AHSettingsError(self,@"Context window phải từ 0 tới 2.000.000 token; 0 = chưa biết."); return; }
+    if(!window.length || [window rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location!=NSNotFound || window.integerValue<0 || window.integerValue>2000000) { AHSettingsError(self,@"Context window phải từ 0 tới 2.000.000 token; 0 = tự nhận diện."); return; }
     if(!limit.length || [limit rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location!=NSNotFound || limit.integerValue<256 || limit.integerValue>32768) { AHSettingsError(self,@"Max output tokens phải từ 256 tới 32768 (tùy giới hạn model)."); return; }
     NSString *error=nil; NSURL *url=AHChatURL(gemini?@"https://generativelanguage.googleapis.com/v1beta/openai/":values[1],&error);
     if(!name.length || !model.length || !url) { AHSettingsError(self,error ?: @"Cần tên provider và model ID."); return; }
