@@ -111,8 +111,10 @@ static NSString *encode(id value) { return [[NSString alloc] initWithData:[NSJSO
         if(![self.job isEqual:job]) return;
         NSString *summary=message[@"content"]; BOOL valid=!failure && [summary isKindOfClass:NSString.class] && AHCompactSummaryValid(summary,summaryBudget,[plan[@"before_tokens"] unsignedIntegerValue]) && (!message[@"tool_calls"] || ([message[@"tool_calls"] isKindOfClass:NSArray.class] && ![message[@"tool_calls"] count]));
         if(valid) { summary=[summary stringByReplacingOccurrencesOfString:self.key withString:@"[API KEY REDACTED]"]; valid=AHCompactSummaryValid(summary,summaryBudget,[plan[@"before_tokens"] unsignedIntegerValue]); }
+        NSArray *missing=valid?AHCompactMissingIdentifiers(summary,plan[@"required_identifiers"]):@[];
+        if(missing.count) valid=NO;
         if(valid) { [self sql:@"UPDATE compactions SET state='ready',summary=?,after_chars=? WHERE id=? AND state='running'" values:@[summary,@(summary.length),job]]; }
-        else [self sql:@"UPDATE compactions SET state='failed',error=? WHERE id=? AND state='running'" values:@[failure.localizedDescription ?: @"Summary không hợp lệ, quá dài hoặc chưa giảm context",job]];
+        else [self sql:@"UPDATE compactions SET state='failed',error=? WHERE id=? AND state='running'" values:@[failure.localizedDescription ?: (missing.count?@"Summary thiếu mã định danh trong nguồn; giữ summary cũ. Hãy thử compact lại hoặc đổi model.":@"Summary không hợp lệ, quá dài hoặc chưa giảm context"),job]];
         self.job=nil; self.key=nil; self.provider=nil; [self.lease end]; self.lease=nil;
     }];
     return @{@"id":job};

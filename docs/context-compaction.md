@@ -67,3 +67,9 @@ python3 scripts/evaluate-compaction.py --run --endpoint https://HOST/v1/chat/com
 ```
 
 Không ghi/hiển thị API key, không theo redirect. Output chỉ từ fixtures giả lập, mặc định lưu `/tmp/agenthome-compaction-eval.json`. Kiểm tra tự động này là kiểm tra dữ kiện bằng chuỗi, không chứng minh đầy đủ ngữ nghĩa/an toàn; cần đọc summary và thử tiếp tục nhiệm vụ từ summary để đánh giá đúng. Chưa chạy eval trên provider thật trong phiên triển khai này vì không có API key trong môi trường host. Chưa bật auto-compact.
+
+## Kiểm tra trên thiết bị và bản sửa 0.11.1
+
+Đã chạy API thật qua daemon trên iPhone với 244 tin giả lập; xem [báo cáo tương tác](live-test-2026-10-30.md). Luồng chạy/compact/activate/chat và chống gửi trùng hoạt động, nhưng phát hiện mất mã dự án và lỗi truy xuất dữ kiện của model. Chưa chứng minh đầy đủ context 200K.
+
+0.11.1 chỉnh prompt, kiểm tra mã định danh literal của user messages được chọn và summary trước; thiếu mã thì candidate failed, giữ active cũ. Đây chỉ là guard cho dạng mã đơn giản, không đảm bảo toàn bộ thông tin/ngữ nghĩa. Đã lưu ca lỗi thật làm regression. Bản sửa đã build, chưa kiểm tra lại trên iPhone; auto-compact vẫn tắt.
