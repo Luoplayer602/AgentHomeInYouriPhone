@@ -2,6 +2,7 @@
 #import "AHAgentRuntime.h"
 #import "AHWebServer.h"
 #import "AHCompaction.h"
+#import "AHMemorySearch.h"
 #import <sqlite3.h>
 #import "../shared/AHDatabase.h"
 #import <sys/socket.h>
@@ -16,6 +17,7 @@ static AHAgentRuntime *agent;
 static AHWebServer *web;
 static AHCompaction *compaction;
 static id execute(NSString *method, NSDictionary *params, NSString **error) {
+    if([method isEqual:@"memory.search"]) return AHMemorySearch(db,params[@"conversation_id"],params[@"arguments"],error);
     if([method hasPrefix:@"context."]) return [compaction handle:method params:params error:error];
     if([method hasPrefix:@"web."]) return [web handle:method params:params error:error];
     if([method hasPrefix:@"ai."]) return [agent handle:method params:params error:error];
@@ -81,6 +83,7 @@ static id execute(NSString *method, NSDictionary *params, NSString **error) {
             else sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);
         } else if(rc==SQLITE_DONE) rc=SQLITE_OK;
         if(rc!=SQLITE_OK || !changed) { *error=@"Conversation operation failed"; return nil; }
+        if(deletion) { sqlite3_stmt *clean=NULL; if(sqlite3_prepare_v2(db,"DELETE FROM context_settings WHERE scope=?",-1,&clean,NULL)==SQLITE_OK) { sqlite3_bind_text(clean,1,identifier.UTF8String,-1,SQLITE_TRANSIENT); sqlite3_step(clean); } sqlite3_finalize(clean); }
         return @{@"ok":@YES};
     }
     if ([method isEqual:@"chat.create"]) {
@@ -186,8 +189,10 @@ static void runQueuedTasks(void) {
     } }
 }
 extern int AHMemorySelfTest(void);
+extern int AHContextSelfTest(void);
 int main(int argc,const char *argv[]) { @autoreleasepool {
     if(argc==2 && strcmp(argv[1],"--self-test-memory")==0) return AHMemorySelfTest();
+    if(argc==2 && strcmp(argv[1],"--self-test-context")==0) return AHContextSelfTest();
     signal(SIGPIPE, SIG_IGN); umask(0077);
     NSError *error = nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:AHDataPath withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0700} error:&error]) return 1;
@@ -196,6 +201,7 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     if(AHTaskRecover(db)!=SQLITE_OK) return 6;
     compaction=[[AHCompaction alloc] initWithDatabase:db];
     agent=[[AHAgentRuntime alloc] initWithDatabase:db tool:^NSDictionary *(NSString *name){ NSString *error=nil; return execute(name,@{},&error); }];
+    agent.compaction=compaction;
     web=[[AHWebServer alloc] initWithDatabase:db rpc:^id(NSString *method,NSDictionary *params,NSString **error){
         @try { return execute(method,params,error); }
         @catch(NSException *exception) { NSLog(@"AgentHome web RPC %@ failed: %@",method,exception.name); if(error) *error=@"Daemon gặp lỗi xử lý request; hãy báo tên thao tác."; return nil; }

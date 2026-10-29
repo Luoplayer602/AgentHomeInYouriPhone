@@ -2,6 +2,9 @@
 #import "AHActivityLease.h"
 #import "AHModelLimits.h"
 #import "AHHistory.h"
+#import "AHCompaction.h"
+#import "AHMemorySearch.h"
+#import "AHUsage.h"
 #import "../app/AHProvider.h"
 #import "../app/AHProviderConfig.h"
 #import "../app/AHProfiles.h"
@@ -23,6 +26,9 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
 @property (nonatomic,copy) NSString *activeKey;
 @property (nonatomic,strong) AHActivityLease *lease;
 @property NSTimeInterval lastCheckpoint;
+@property (nonatomic,copy) NSString *preparingID;
+@property (nonatomic,copy) NSString *preparingKey;
+@property (nonatomic,copy) NSString *activeConversation;
 @end
 @implementation AHAgentRuntime
 - (instancetype)initWithDatabase:(sqlite3 *)db tool:(NSDictionary *(^)(NSString *))tool { if((self=[super init])) { self.db=db; self.tool=tool; } return self; }
@@ -60,15 +66,16 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         NSDictionary *limits=AHModelLimits(config);
         NSMutableDictionary *snapshot=[@{@"id":config[@"id"],@"endpoint":url.absoluteString,@"model":config[@"model"],@"disableStreaming":@([config[@"disableStreaming"] boolValue]),@"context_window_tokens":@([config[@"context_window_tokens"] integerValue]),@"max_output_tokens":@([config[@"max_output_tokens"] respondsToSelector:@selector(integerValue)] ? MAX(256,MIN(32768,[config[@"max_output_tokens"] integerValue])):8192)} mutableCopy];
         snapshot[@"max_output_tokens"]=limits[@"output_tokens"];
+        snapshot[@"model_input_budget_tokens"]=limits[@"input_budget_tokens"];
         snapshot[@"context_window_tokens"]=limits[@"window_tokens"];
-        snapshot[@"input_budget_tokens"]=limits[@"input_budget_tokens"];
+        snapshot[@"input_budget_tokens"]=@((NSUInteger)([limits[@"input_budget_tokens"] doubleValue]/AHUsageFactor(self.db,snapshot)));
         snapshot[@"context_source"]=limits[@"source"];
         BOOL ok=[self sql:@"BEGIN IMMEDIATE" values:@[]];
         if(ok) ok=[self sql:@"INSERT INTO tasks(id,conversation_id,tool) VALUES (?,?,'chat.ai')" values:@[identifier,conversation]];
         if(ok) ok=[self sql:@"INSERT INTO messages(role,content,conversation_id) VALUES ('user',?,?)" values:@[text,conversation]];
         NSDictionary *summary=[self rows:@"SELECT id,end_id,summary FROM compactions WHERE conversation_id=? AND state='active' LIMIT 1" values:@[conversation]].firstObject;
         NSArray *history=AHHistory(self.db,conversation,summary[@"end_id"] ?: @"0");
-        NSDictionary *plan=AHPromptPlan(history,summary[@"summary"],snapshot[@"model"],[limits[@"input_budget_tokens"] unsignedIntegerValue]);
+        NSDictionary *plan=AHPromptPlan(history,summary[@"summary"],snapshot[@"model"],[snapshot[@"input_budget_tokens"] unsignedIntegerValue]);
         if(![plan[@"recent_count"] unsignedIntegerValue]) { [self sql:@"ROLLBACK" values:@[]]; *error=@"Tin nhắn vượt ngân sách input; tăng context window hoặc rút gọn nội dung."; return nil; }
         NSMutableArray *context=[plan[@"messages"] mutableCopy];
         if(ok) ok=[self sql:@"INSERT INTO ai_runs(task_id,config,context) VALUES (?,?,?)" values:@[identifier,json(snapshot),json(context)]];
@@ -87,19 +94,37 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         NSString *identifier=params[@"id"]; if(![identifier isKindOfClass:NSString.class]) { *error=@"Invalid task"; return nil; }
         NSDictionary *task=[self rows:@"SELECT state FROM tasks WHERE id=? AND tool='chat.ai'" values:@[identifier]].firstObject;
         if([identifier isEqual:self.activeID]) { [self.provider cancel]; self.provider=nil; [self finish:@"cancelled" error:@"Đã dừng" answer:nil]; }
-        else if([task[@"state"] isEqual:@"queued"]) AHTaskTransition(self.db,identifier.UTF8String,"queued","cancelled","","Cancelled before request");
+        else if([task[@"state"] isEqual:@"queued"]) { AHTaskTransition(self.db,identifier.UTF8String,"queued","cancelled","","Cancelled before request"); [self.compaction cancelPreparation:identifier]; }
         return @{@"ok":@YES};
     }
     *error=@"Unknown AI method"; return nil;
 }
 - (void)startNext {
-    if(self.activeID) return;
-    NSDictionary *run=[self rows:@"SELECT t.id,a.config,a.context,a.partial,a.round FROM tasks t JOIN ai_runs a ON a.task_id=t.id WHERE t.state='queued' ORDER BY t.rowid LIMIT 1" values:@[]].firstObject;
+    if(self.activeID || self.preparingID) return;
+    NSDictionary *run=[self rows:@"SELECT t.id,t.conversation_id,a.config,a.context,a.partial,a.round FROM tasks t JOIN ai_runs a ON a.task_id=t.id WHERE t.state='queued' ORDER BY t.rowid LIMIT 1" values:@[]].firstObject;
     if(!run) return;
-    if(AHTaskTransition(self.db,[run[@"id"] UTF8String],"queued","running","","Provider request started")!=SQLITE_OK) return;
-    self.activeID=run[@"id"]; self.config=parse(run[@"config"]); self.context=[parse(run[@"context"]) mutableCopy]; self.partial=[NSMutableString string]; self.round=[run[@"round"] integerValue];
+    self.preparingKey=AHReadKey(parse(run[@"config"])[@"id"]);
+    if(!self.preparingKey.length) { AHTaskTransition(self.db,[run[@"id"] UTF8String],"queued","failed","Mở khóa iPhone để bắt đầu lượt AI.","Keychain unavailable before context preparation; no API request sent"); [self startNext]; return; }
+    self.preparingID=run[@"id"];
+    [self.compaction prepareConversation:run[@"conversation_id"] profile:parse(run[@"config"]) task:run[@"id"] key:self.preparingKey completion:^(NSString *error){
+        self.preparingID=nil;
+        NSDictionary *state=[self rows:@"SELECT state FROM tasks WHERE id=?" values:@[run[@"id"]]].firstObject;
+        if(![state[@"state"] isEqual:@"queued"]) { self.preparingKey=nil; [self startNext]; return; }
+        if(error) { self.preparingKey=nil; AHTaskTransition(self.db,[run[@"id"] UTF8String],"queued","failed",error.UTF8String,"Context preparation stopped; original message preserved"); [self startNext]; return; }
+        [self startPrepared:run];
+    }];
+}
+- (void)startPrepared:(NSDictionary *)run {
+    NSMutableDictionary *config=[parse(run[@"config"]) mutableCopy];
+    if(config[@"model_input_budget_tokens"]) config[@"input_budget_tokens"]=@((NSUInteger)([config[@"model_input_budget_tokens"] doubleValue]/AHUsageFactor(self.db,config)));
+    NSDictionary *summary=[self rows:@"SELECT end_id,summary FROM compactions WHERE conversation_id=? AND state='active' LIMIT 1" values:@[run[@"conversation_id"]]].firstObject;
+    NSArray *history=AHHistory(self.db,run[@"conversation_id"],summary[@"end_id"] ?: @"0");
+    NSDictionary *plan=AHPromptPlan(history,summary[@"summary"],config[@"model"],[config[@"input_budget_tokens"] unsignedIntegerValue] ?: 23500);
+    if(![plan[@"recent_count"] unsignedIntegerValue] || ![self sql:@"UPDATE ai_runs SET context=? WHERE task_id=?" values:@[json(plan[@"messages"]),run[@"id"]]]) { AHTaskTransition(self.db,[run[@"id"] UTF8String],"queued","failed","Context cannot fit after preparation","No API request sent"); self.preparingKey=nil; [self startNext]; return; }
+    if(AHTaskTransition(self.db,[run[@"id"] UTF8String],"queued","running","","Provider request started")!=SQLITE_OK) { self.preparingKey=nil; return; }
+    self.activeID=run[@"id"]; self.config=config; self.context=[plan[@"messages"] mutableCopy]; self.activeConversation=run[@"conversation_id"]; self.partial=[NSMutableString string]; self.round=[run[@"round"] integerValue];
     self.reasoning=[NSMutableString string];
-    self.activeKey=AHReadKey(self.config[@"id"]);
+    self.activeKey=self.preparingKey; self.preparingKey=nil;
     self.lease=[AHActivityLease new]; int32_t power=[self.lease begin];
     NSString *note=[NSString stringWithFormat:@"Power assertion result: %d (0=accepted); display may lock",(int)power];
     AHTaskEvent(self.db,self.activeID.UTF8String,"running",note.UTF8String);
@@ -117,7 +142,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
 - (void)request {
     NSString *key=self.activeKey;
     if(!key.length) { [self finish:@"failed" error:@"Daemon không đọc được API key khi bắt đầu lượt. Mở khóa thiết bị rồi gửi lại." answer:nil]; return; }
-    NSData *payload=[NSJSONSerialization dataWithJSONObject:@{@"messages":self.context,@"tools":@[AHSystemInfoTool()]} options:0 error:nil];
+    NSData *payload=[NSJSONSerialization dataWithJSONObject:@{@"messages":self.context,@"tools":AHTools()} options:0 error:nil];
     NSUInteger ceiling=[self.config[@"input_budget_tokens"] unsignedIntegerValue];
     if(ceiling && (payload.length+2)/3+self.context.count*8>ceiling) { [self finish:@"failed" error:@"Tool context vượt ngân sách input. Compact hoặc tăng context window trước lượt tiếp theo." answer:nil]; return; }
     NSString *identifier=self.activeID; self.provider=[AHProvider new];
@@ -127,13 +152,16 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         AHAgentRuntime *self=weakSelf; if(!self || ![self.activeID isEqual:identifier]) return; [self.reasoning appendString:delta];
         if(NSDate.timeIntervalSinceReferenceDate-self.lastCheckpoint>0.2) [self checkpoint];
     };
-    NSDictionary *tool=AHSystemInfoTool();
-    [self.provider sendTo:[NSURL URLWithString:self.config[@"endpoint"]] model:self.config[@"model"] key:key messages:self.context tools:@[tool] streaming:![self.config[@"disableStreaming"] boolValue] delta:^(NSString *delta){
+    NSArray *tools=AHTools();
+    [self.provider sendTo:[NSURL URLWithString:self.config[@"endpoint"]] model:self.config[@"model"] key:key messages:self.context tools:tools streaming:![self.config[@"disableStreaming"] boolValue] delta:^(NSString *delta){
         if(![self.activeID isEqual:identifier]) return; [self.partial appendString:delta];
         if(NSDate.timeIntervalSinceReferenceDate-self.lastCheckpoint>0.2) [self checkpoint];
     } completion:^(NSDictionary *message,NSError *error){
         if(![self.activeID isEqual:identifier]) return;
-        if(self.provider.usage) [self sql:@"INSERT OR REPLACE INTO token_usage(task_id,usage) VALUES (?,?)" values:@[identifier,json(self.provider.usage)]];
+        if(self.provider.usage) {
+            [self sql:@"INSERT OR REPLACE INTO token_usage(task_id,usage) VALUES (?,?)" values:@[identifier,json(self.provider.usage)]];
+            AHUsageRecord(self.db,identifier,self.round,self.config,self.provider.usage,(payload.length+2)/3+self.context.count*8);
+        }
         NSString *finish=[NSString stringWithFormat:@"Provider finish_reason: %@",self.provider.finishCause ?: @"not supplied"];
         AHTaskEvent(self.db,identifier.UTF8String,"running",finish.UTF8String); self.provider=nil;
         if(!self.reasoning.length && [message[@"reasoning_content"] isKindOfClass:NSString.class]) [self.reasoning appendString:[message[@"reasoning_content"] substringToIndex:MIN([message[@"reasoning_content"] length],(NSUInteger)64000)]];
@@ -146,11 +174,18 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
             if(self.round>=3 || [calls count]>4) { [self finish:@"failed" error:@"Tool limit exceeded" answer:nil]; return; }
             for(id call in calls) {
                 id function=[call isKindOfClass:NSDictionary.class]?call[@"function"]:nil;
-                if(![call isKindOfClass:NSDictionary.class] || ![function isKindOfClass:NSDictionary.class] || ![call[@"id"] isKindOfClass:NSString.class] || ![function[@"name"] isEqual:@"system_info"] || ![function[@"arguments"] isKindOfClass:NSString.class]) { [self finish:@"failed" error:@"Tool denied" answer:nil]; return; }
-                id args=parse(function[@"arguments"]); if(![args isKindOfClass:NSDictionary.class] || [args count]) { [self finish:@"failed" error:@"Tool arguments denied" answer:nil]; return; }
+                if(![call isKindOfClass:NSDictionary.class] || ![function isKindOfClass:NSDictionary.class] || ![call[@"id"] isKindOfClass:NSString.class] || ![@[@"system_info",@"memory_search"] containsObject:function[@"name"]] || ![function[@"arguments"] isKindOfClass:NSString.class]) { [self finish:@"failed" error:@"Tool denied" answer:nil]; return; }
+                id args=parse(function[@"arguments"]); if(![args isKindOfClass:NSDictionary.class] || ([function[@"name"] isEqual:@"system_info"] && [args count])) { [self finish:@"failed" error:@"Tool arguments denied" answer:nil]; return; }
             }
             [self.context addObject:message];
-            for(NSDictionary *call in calls) { NSDictionary *result=self.tool(@"system.info"); [self.context addObject:@{@"role":@"tool",@"tool_call_id":call[@"id"],@"content":json(result ?: @{@"error":@"Tool failed"})}]; AHTaskEvent(self.db,identifier.UTF8String,"running","Executed system.info (risk 0)"); }
+            for(NSDictionary *call in calls) {
+                NSString *toolError=nil; NSString *name=call[@"function"][@"name"];
+                NSDictionary *result=[name isEqual:@"memory_search"]?AHMemorySearch(self.db,self.activeConversation,parse(call[@"function"][@"arguments"]),&toolError):self.tool(@"system.info");
+                NSString *content=json(result ?: @{@"error":toolError ?: @"Tool failed"});
+                if(self.activeKey.length) content=[content stringByReplacingOccurrencesOfString:self.activeKey withString:@"[API KEY REDACTED]"];
+                [self.context addObject:@{@"role":@"tool",@"tool_call_id":call[@"id"],@"content":content}];
+                AHTaskEvent(self.db,identifier.UTF8String,"running",[name isEqual:@"memory_search"]?"Executed conversation-scoped memory_search (read only)":"Executed system.info (risk 0)");
+            }
             self.round++; self.partial=[NSMutableString string]; [self checkpoint]; [self request]; return;
         }
         id answer=message[@"content"]; if(![answer isKindOfClass:NSString.class] || ![answer length]) { [self finish:@"failed" error:@"Invalid provider answer" answer:nil]; return; }

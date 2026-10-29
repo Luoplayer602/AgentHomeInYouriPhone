@@ -152,10 +152,13 @@ static void replyJSON(int fd,int status,id object,NSString *extra) { respond(fd,
             NSDictionary *params=@{@"conversation_id":identifier}; id history=self.rpc(@"chat.list",params,&error); id snapshot=self.rpc(@"ai.snapshot",params,&error);
             if(history && snapshot) result=@{@"history":history,@"snapshot":snapshot}; stream=[path isEqual:@"/api/events"];
         } else if(request.method=="POST" && [path isEqual:@"/api/create"]) result=self.rpc(@"chat.create",@{},&error);
+        else if(request.method=="GET" && [path isEqual:@"/api/memory-search"]) result=self.rpc(@"memory.search",@{@"conversation_id":query[@"conversation_id"] ?: @"",@"arguments":@{@"query":query[@"query"] ?: @"",@"category":query[@"category"] ?: @"all"}},&error);
+        else if(request.method=="GET" && [path isEqual:@"/api/checkpoints"]) result=self.rpc(@"context.checkpoints",@{@"conversation_id":query[@"conversation_id"] ?: @""},&error);
+        else if(request.method=="GET" && [path isEqual:@"/api/checkpoint"]) result=self.rpc(@"context.checkpoint",@{@"conversation_id":query[@"conversation_id"] ?: @"",@"id":query[@"id"] ?: @""},&error);
         else if(request.method=="GET" && [path isEqual:@"/api/context"]) result=self.rpc(@"context.status",@{@"conversation_id":query[@"conversation_id"] ?: @"",@"profile":self.profile ?: @{}},&error);
-        else if(request.method=="POST" && [@[@"/api/compact",@"/api/activate",@"/api/discard",@"/api/drop"] containsObject:path]) {
-            NSString *method=[path isEqual:@"/api/compact"]?@"context.compact":[path isEqual:@"/api/activate"]?@"context.activate":[path isEqual:@"/api/discard"]?@"context.discard":@"context.drop";
-            result=self.rpc(method,@{@"conversation_id":[body[@"conversation_id"] isKindOfClass:NSString.class]?body[@"conversation_id"]:@"",@"id":[body[@"id"] isKindOfClass:NSString.class]?body[@"id"]:@"",@"profile":self.profile ?: @{}},&error);
+        else if(request.method=="POST" && [@[@"/api/compact",@"/api/activate",@"/api/discard",@"/api/drop",@"/api/restore",@"/api/context-config"] containsObject:path]) {
+            NSString *method=[path isEqual:@"/api/context-config"]?@"context.configure":[path isEqual:@"/api/restore"]?@"context.restore":[path isEqual:@"/api/compact"]?@"context.compact":[path isEqual:@"/api/activate"]?@"context.activate":[path isEqual:@"/api/discard"]?@"context.discard":@"context.drop";
+            result=self.rpc(method,[method isEqual:@"context.configure"]?body:@{@"conversation_id":[body[@"conversation_id"] isKindOfClass:NSString.class]?body[@"conversation_id"]:@"",@"id":[body[@"id"] isKindOfClass:NSString.class]?body[@"id"]:@"",@"profile":self.profile ?: @{}},&error);
         }
         else if(request.method=="POST" && [path isEqual:@"/api/submit"]) {
             if(!self.profile.count || ![body[@"conversation_id"] isKindOfClass:NSString.class] || ![body[@"text"] isKindOfClass:NSString.class] || ![body[@"id"] isKindOfClass:NSString.class]) { code=400; result=@{@"error":@"Thiếu cấu hình provider hoặc nội dung"}; return; }

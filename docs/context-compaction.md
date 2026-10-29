@@ -117,3 +117,9 @@ Bản 0.13.0 đã build, core/SQL/eval host pass. Chưa chạy self-test native 
 ### Kết quả thiết bị 0.13.0
 
 Self-test native **PASS**. Ca gốc 244 tin đã compact ready và activate thành công: 141.282 → 5.319 ký tự. Memory giữ mã/path/endpoint/trạng thái phủ định, không chứa payload secret/marker giả. Hỏi lại tổng hợp **8/9**, thiếu project_id dù mã còn trong memory; hỏi riêng không cung cấp mã thì model trả đúng LOTUS-482. Không tính hai lần hỏi thành 9/9. Xem [báo cáo đầy đủ](live-test-2026-10-30.md) và fixture `tests/fixtures/memory-v013-live.json`. Luồng compact hoạt động trong ca này; chất lượng truy xuất nhiều trường vẫn cần cải thiện. Chưa xác minh đầy đủ context 200K; auto-compact vẫn tắt.
+
+## 0.14.0 — lookup, nhiều vòng, usage và auto-compact
+
+Đã thêm tool `memory_search`, thống kê usage từng request/tool round tách provider/model, hiệu chỉnh token budget, auto-compact trước lượt AI có cấu hình/ngưỡng/tự áp dụng hoặc duyệt, checkpoint preview/restore và bộ test thiết bị nhiều vòng/đổi provider/lock/probe. Memory dùng category tags để tránh sao chép cùng một quote ở nhiều mục và giữ sticky evidence qua các vòng. Chi tiết contract, cài đặt, giới hạn và cách kiểm thử ở [Context runtime](context-runtime.md).
+
+Đã đo API thật báo **196.641 input token** ở mẫu gần 200K (bản thiết bị 0.13.0); request được xử lý nhưng câu trả lời không làm đúng yêu cầu marker. Không quy đổi kết quả dung lượng thành điểm chất lượng/nhớ dữ kiện. Auto-compact mặc định tắt; cần cài 0.14.0 rồi chạy native self-test và các ca thiết bị mới trước khi coi chúng đã pass.

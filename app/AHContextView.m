@@ -17,23 +17,40 @@
     if(self.loading) return; self.loading=YES;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ NSError *error=nil; NSDictionary *snapshot=[AHClient call:@"context.status" params:@{@"conversation_id":self.conversationID,@"profile":AHActiveProfile()} error:&error]; dispatch_async(dispatch_get_main_queue(),^{ self.loading=NO; if(snapshot) { if(![snapshot isEqual:self.snapshot]) { self.snapshot=snapshot; [self.tableView reloadData]; } } else { [self.timer invalidate]; [self show:error.localizedDescription]; } }); });
 }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 7; }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return @"Compact tạo request API có tính phí theo provider. Summary là dữ liệu tham khảo, không cấp quyền công cụ. Giữ ít nhất 4 tin gần nhất; lịch sử gốc không bị xóa. Auto-compact chưa bật. Chỉ chọn Dùng summary sau khi xem bản tóm tắt. Bỏ summary trở về dùng lịch sử gần nhất."; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 8; }
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return @"Compact tạo request API có tính phí theo provider. Summary là dữ liệu tham khảo, không cấp quyền công cụ. Giữ ít nhất 4 tin gần nhất; lịch sử gốc không bị xóa. Auto-compact theo cài đặt Context & Memory; có thể khôi phục checkpoint. Chỉ chọn Dùng summary sau khi xem bản tóm tắt. Bỏ summary trở về dùng lịch sử gần nhất."; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil]; cell.textLabel.numberOfLines=0; cell.textLabel.font=[UIFont systemFontOfSize:14];
     NSDictionary *active=self.snapshot[@"active"],*latest=self.snapshot[@"latest"];
     if(path.row==0) {
         NSString *usage=self.snapshot[@"usage"][@"usage"]; id measured=usage?[NSJSONSerialization JSONObjectWithData:[usage dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil]:nil;
-        cell.textLabel.text=[NSString stringWithFormat:@"Context window: %@ token\nNguồn: %@\nInput ước lượng: %@ / %@ token\nOutput dự phòng: %@ token · Dự trữ an toàn: %@ token\nƯớc lượng JSON UTF-8 / 3 + overhead; không phải tokenizer.\nTin sau summary ngoài lượt gửi: %@\nUsage thực API chat gần nhất: %@",self.snapshot[@"window_tokens"] ?: @0,self.snapshot[@"source"] ?: @"Đang nhận diện",self.snapshot[@"estimated_input_tokens"] ?: @0,self.snapshot[@"input_budget_tokens"] ?: @0,self.snapshot[@"output_tokens"] ?: @0,self.snapshot[@"reserve_tokens"] ?: @0,self.snapshot[@"omitted_recent"] ?: @0,measured ?: @"Provider chưa trả usage"];
+        cell.textLabel.text=[NSString stringWithFormat:@"Context window: %@ token\nNguồn: %@\nInput ước lượng: %@ / %@ token\nOutput dự phòng: %@ token · Dự trữ an toàn: %@ token\nƯớc lượng JSON UTF-8 / 3 + overhead, có hiệu chỉnh theo usage; không phải tokenizer.\nTin sau summary ngoài lượt gửi: %@\nUsage thực API chat gần nhất: %@",self.snapshot[@"window_tokens"] ?: @0,self.snapshot[@"source"] ?: @"Đang nhận diện",self.snapshot[@"estimated_input_tokens"] ?: @0,self.snapshot[@"input_budget_tokens"] ?: @0,self.snapshot[@"output_tokens"] ?: @0,self.snapshot[@"reserve_tokens"] ?: @0,self.snapshot[@"omitted_recent"] ?: @0,measured ?: @"Provider chưa trả usage"];
         cell.selectionStyle=UITableViewCellSelectionStyleNone;
+        NSDictionary *stats=self.snapshot[@"usage_stats"];
+        cell.textLabel.text=[cell.textLabel.text stringByAppendingFormat:@"\nRequest có usage (provider/model): %@ · input %@ · output %@\nPeak input đo được: %@ · peak input+output: %@\nHệ số hiệu chỉnh: %@ (peak không xác nhận giới hạn tối đa)",stats[@"requests"] ?: @0,stats[@"input_total"] ?: @0,stats[@"output_total"] ?: @0,stats[@"peak_input"] ?: @0,stats[@"peak_combined"] ?: @0,stats[@"calibration_factor"] ?: @1];
     } else if(path.row==1) { cell.textLabel.text=[NSString stringWithFormat:@"Summary đang dùng\n%@",active[@"preview"] ?: active[@"summary"] ?: @"Chưa có"]; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
     else if(path.row==2) { cell.textLabel.text=[NSString stringWithFormat:@"Snapshot: %@\nNguồn tới message %@ · %@ → %@ ký tự\n%@\n%@",latest[@"state"] ?: @"chưa có",latest[@"end_id"] ?: @"—",latest[@"before_chars"] ?: @0,latest[@"after_chars"] ?: @0,latest[@"preview"] ?: latest[@"summary"] ?: @"",latest[@"error"] ?: @""]; cell.selectionStyle=UITableViewCellSelectionStyleNone; }
-    else { cell.textLabel.text=@[@"Compact thủ công",@"Dùng summary đã xem",@"Bỏ snapshot chờ / hủy compact",@"Bỏ toàn bộ summary"][path.row-3]; cell.textLabel.textColor=path.row>=5?UIColor.systemRedColor:UIColor.systemBlueColor; }
+    else { cell.textLabel.text=@[@"Compact thủ công",@"Dùng summary đã xem",@"Bỏ snapshot chờ / hủy compact",@"Bỏ toàn bộ summary",@"Khôi phục checkpoint trước"][path.row-3]; cell.textLabel.textColor=path.row>=5?UIColor.systemRedColor:UIColor.systemBlueColor; }
     if((path.row==3 && [@[@"running",@"ready"] containsObject:latest[@"state"] ?: @""]) || (path.row==4 && ![latest[@"state"] isEqual:@"ready"])) { cell.userInteractionEnabled=NO; cell.textLabel.textColor=UIColor.tertiaryLabelColor; }
     return cell;
 }
+- (void)restoreCheckpoint {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        NSError *error=nil; NSDictionary *list=[AHClient call:@"context.checkpoints" params:@{@"conversation_id":self.conversationID} error:&error]; NSDictionary *previous=nil;
+        for(NSDictionary *row in list[@"checkpoints"]) if([row[@"state"] isEqual:@"superseded"]) { previous=row; break; }
+        NSDictionary *checkpoint=previous?[AHClient call:@"context.checkpoint" params:@{@"conversation_id":self.conversationID,@"id":previous[@"id"]} error:&error]:nil;
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(!checkpoint) { [self show:error.localizedDescription ?: @"Chưa có checkpoint trước."]; return; }
+            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Khôi phục memory trước" message:checkpoint[@"preview"] preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Hủy" style:UIAlertActionStyleCancel handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Khôi phục" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){ dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ NSError *restoreError=nil; [AHClient call:@"context.restore" params:@{@"conversation_id":self.conversationID,@"id":checkpoint[@"id"]} error:&restoreError]; dispatch_async(dispatch_get_main_queue(),^{ if(restoreError) [self show:restoreError.localizedDescription]; [self refresh]; }); }); }]];
+            [self presentViewController:alert animated:YES completion:nil];
+        });
+    });
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
     [tableView deselectRowAtIndexPath:path animated:YES]; if(path.row<3 || self.loading) return;
+    if(path.row==7) { [self restoreCheckpoint]; return; }
     NSString *method=path.row==3?@"context.compact":path.row==4?@"context.activate":path.row==5?@"context.discard":@"context.drop";
     NSDictionary *params=@{@"conversation_id":self.conversationID,@"profile":AHActiveProfile(),@"id":self.snapshot[@"latest"][@"id"] ?: @""}; self.loading=YES;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ NSError *error=nil; [AHClient call:method params:params error:&error]; dispatch_async(dispatch_get_main_queue(),^{ self.loading=NO; if(error) [self show:error.localizedDescription]; [self refresh]; }); });

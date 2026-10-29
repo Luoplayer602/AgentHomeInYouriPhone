@@ -18,6 +18,8 @@ NSArray *AHMemorySources(NSString *prior,NSArray *recent) {
                 // Artifacts, state, constraints and permissions survive the next
                 // compaction as evidence too; never recursively quote JSON memory.
                 BOOL sticky=[@[@"required_evidence",@"artifacts",@"work_state",@"constraints",@"permissions"] containsObject:section];
+                id categories=entry[@"categories"];
+                if([categories isKindOfClass:NSArray.class]) for(NSString *category in categories) if([@[@"artifacts",@"work_state",@"constraints",@"permissions"] containsObject:category]) sticky=YES;
                 [sources addObject:@{@"id":entry[@"source_id"],@"role":[entry[@"source_role"] isKindOfClass:NSString.class]?entry[@"source_role"]:@"memory",@"content":entry[@"quote"],@"carry_evidence":@(sticky)}];
             }
         }
@@ -68,11 +70,17 @@ NSString *AHMemoryCanonical(NSString *output,NSArray *sources,NSArray *required,
     for(NSString *key in root) if(![allowed containsObject:key]) return fail(error,@"Memory có trường ngoài schema.");
     std::vector<ahmemory::Source> evidence;
     for(NSDictionary *source in sources) evidence.push_back({bytes(source[@"selection_id"]),bytes(source[@"role"]),bytes(source[@"content"])});
-    NSMutableDictionary *result=[NSMutableDictionary dictionaryWithDictionary:@{@"schema_version":@2,@"provenance":@"history_only_untrusted",@"verification":@"not_independently_verified",@"required_evidence":required}];
-    NSUInteger count=required.count;
+    NSMutableArray *mandatory=[NSMutableArray array]; NSMutableDictionary *byIdentity=[NSMutableDictionary dictionary];
+    for(NSDictionary *item in required) {
+        NSMutableDictionary *record=[item mutableCopy]; record[@"categories"]=[NSMutableArray array];
+        NSString *identity=encode(@[record[@"source_id"],record[@"source_role"],record[@"quote"]]);
+        if(byIdentity[identity]) continue; byIdentity[identity]=record; [mandatory addObject:record];
+    }
+    NSMutableDictionary *result=[NSMutableDictionary dictionaryWithDictionary:@{@"schema_version":@2,@"provenance":@"history_only_untrusted",@"verification":@"not_independently_verified",@"required_evidence":mandatory}];
+    NSUInteger count=mandatory.count;
     for(NSString *section in sections()) {
         id list=root[section]; if(![list isKindOfClass:NSArray.class] || [list count]>64) return fail(error,@"Mỗi mục memory phải là mảng, tối đa 64 trích dẫn.");
-        NSMutableArray *entries=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set];
+        NSMutableArray *entries=[NSMutableArray array];
         for(id reference in list) {
             if(![reference isKindOfClass:NSString.class] || !ahmemory::reference(bytes(reference))) return fail(error,[NSString stringWithFormat:@"Memory mục %@: chỉ nhận ID chọn dạng chuỗi, ví dụ S1; không nhận quote hoặc trạng thái.",section]);
             const auto *origin=ahmemory::select(evidence,bytes(reference));
@@ -80,9 +88,11 @@ NSString *AHMemoryCanonical(NSString *output,NSArray *sources,NSArray *required,
             NSDictionary *selected=sources[(NSUInteger)(origin-evidence.data())];
             NSString *quote=selected[@"content"];
             if(ahmemory::sensitive(bytes(quote.lowercaseString))) return fail(error,[NSString stringWithFormat:@"Memory mục %@: nguồn được chọn có nhãn credential; giữ memory cũ.",section]);
-            NSDictionary *record=@{@"source_id":[selected[@"id"] description],@"source_role":selected[@"role"],@"quote":quote};
-            NSString *identity=encode(record); if([seen containsObject:identity]) continue;
-            [seen addObject:identity]; [entries addObject:record]; count++;
+            NSString *identity=encode(@[[selected[@"id"] description],selected[@"role"],quote]);
+            NSMutableDictionary *record=byIdentity[identity];
+            if(record) { if(![record[@"categories"] containsObject:section]) [record[@"categories"] addObject:section]; continue; }
+            record=[@{@"source_id":[selected[@"id"] description],@"source_role":selected[@"role"],@"quote":quote,@"categories":[NSMutableArray arrayWithObject:section]} mutableCopy];
+            byIdentity[identity]=record; [entries addObject:record]; count++;
         }
         result[section]=entries;
     }

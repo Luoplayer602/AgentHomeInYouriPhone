@@ -37,7 +37,8 @@ int AHMemorySelfTest(void) {
         NSString *picked=AHMemoryCanonical(json(model),sameID,@[],&error);
         if(!picked || ![picked containsString:@"second excerpt"] || [picked containsString:@"first excerpt"]) return 14;
         id memory=[NSJSONSerialization JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-        if([memory[@"work_state"] count]!=1 || ![memory[@"work_state"][0][@"source_id"] isEqual:@"231"] || ![memory[@"work_state"][0][@"quote"] isEqual:pending]) return 15;
+        NSDictionary *state=nil; for(NSDictionary *record in memory[@"required_evidence"]) if([record[@"source_id"] isEqual:@"231"]) state=record;
+        if([memory[@"work_state"] count]!=0 || ![state[@"categories"] containsObject:@"work_state"] || ![state[@"quote"] isEqual:pending]) return 15;
         if(AHMemoryCatalog([sources arrayByAddingObject:sources[0]]).count!=2) return 16;
         puts("PASS native memory selection: catalog IDs, full-source copies, provenance, mandatory path/state, credential exclusion, dedupe, unknown IDs, schema, carry-forward, preview, budgets");
         return 0;

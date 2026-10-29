@@ -14,6 +14,6 @@ vm.runInContext('rich(holder,"# Hello\\n```\\nprint(1)\\n```\\n| A | B |\\n| ---
 const code=holder.children.find(e=>e.className==='code'); assert(code); assert(code.children[0].children[0].textContent==='Code');
 const table=holder.children.find(e=>e.className==='table'); assert(table&&table.children[0].children.length===2);
 const button=code.children[0].children[1];button.onclick();assert(copied==='print(1)\n');
-vm.runInContext('settings={interactive:false};selected="one";snapshot={state:"running"};controls()',context);assert(ids.send.disabled&&ids.stop.disabled&&ids.text.disabled&&ids.create.disabled);
+vm.runInContext('settings={interactive:false};selected="one";snapshot={state:"running"};controls()',context);assert(ids.send.disabled&&ids.stop.disabled&&ids.text.disabled&&ids.create.disabled&&ids.ctxSave.disabled&&ids.ctxRestore.disabled);
 vm.runInContext('settings={interactive:true};snapshot={state:"completed"};controls()',context);assert(!ids.send.disabled&&ids.stop.disabled);
 console.log('PASS web UI: actual JavaScript syntax, code box, optional language, exact copy, table, literal HTML, read-only controls');

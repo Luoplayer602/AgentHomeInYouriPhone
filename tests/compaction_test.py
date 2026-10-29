@@ -20,7 +20,7 @@ def ready(job): db.execute(sql("UPDATE compactions SET state='ready'"),('summary
 def activate(job,conversation):
  db.execute('BEGIN IMMEDIATE')
  db.execute(sql("UPDATE compactions SET state='superseded'"),(conversation,))
- db.execute(sql("UPDATE compactions SET state='active'"),(job,))
+ db.execute(next(q for q in queries if q.startswith("UPDATE compactions SET state='active'") and "state='ready'" in q),(job,))
  db.execute('COMMIT')
 create('one','a');ready('one');activate('one','a')
 create('cancel','a','one')
@@ -58,3 +58,14 @@ assert db.execute('SELECT count(*) FROM messages WHERE conversation_id=? AND id>
 assert not db.execute(boundary_query,('long',boundary)).fetchall()
 assert len(db.execute(source_query,('a',6,8)).fetchall())==2
 print('PASS compact planner SQL: contiguous prefix, >200 messages, retain four newest, active-summary boundary')
+
+# Restore uses the actual guarded superseded -> active SQL and preserves raw messages.
+before_restore=db.execute('SELECT * FROM messages').fetchall()
+db.execute("UPDATE compactions SET state='active' WHERE id='two'")
+db.execute('BEGIN IMMEDIATE')
+db.execute(sql("UPDATE compactions SET state='superseded'"),('a',))
+db.execute(next(q for q in queries if q.startswith("UPDATE compactions SET state='active'") and "state='superseded'" in q),('one',))
+db.execute('COMMIT')
+assert db.execute("SELECT id FROM compactions WHERE conversation_id='a' AND state='active'").fetchall()==[('one',)]
+assert db.execute('SELECT * FROM messages').fetchall()==before_restore
+print('PASS checkpoint restore: active swap guarded by prior state; raw history retained')
