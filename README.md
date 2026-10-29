@@ -1,0 +1,147 @@
+# Agent Home — nền tảng v0.5.2
+
+App iOS và daemon độc lập dành cho iPhone jailbreak rootless. Đích hiện tại: iPhone 6s, iOS 15, Dopamine; build bằng Theos trong WSL2.
+
+## Bản 0.5.1
+
+Tin nhắn người dùng đo chiều rộng theo nội dung, giữ căn phải và giới hạn 86% chiều rộng hàng; tin dài xuống dòng. Tin AI giữ vùng rộng để hiển thị code/bảng.
+
+**Cài đặt → Hiển thị** có slider 5 mốc snap: Nhỏ 14 pt, Vừa 16 pt (mặc định), Lớn 18 pt, Rất lớn 20 pt, Tối đa 22 pt. Kéo để chọn và xem trước, lưu ngay. Áp dụng cho hội thoại, ô nhập, tiêu đề danh sách chat, code và bảng khi quay lại; không đổi font toàn hệ thống. Cache Markdown phân biệt cỡ chữ để lịch sử cũ cũng cập nhật đúng.
+
+Kiểm tra thiết bị: tin ngắn/emoji phải ôm nội dung, tin nhiều dòng vẫn căn phải; kéo slider qua từng mốc, quay lại chat kiểm tra cả lịch sử và code/bảng, đóng/mở app kiểm tra lựa chọn được giữ. Bản này không đổi schema daemon.
+
+## Bản 0.5.0
+
+Cài đặt dùng các hàng và nhóm riêng:
+
+```text
+API PROVIDER
+  Saved providers          tên đang chọn
+  Streaming                [switch]
+DEVICE INFO
+  Device info
+```
+
+Nhấn **Saved providers**: dòng **＋ Add provider** ở trên, dưới là tên từng provider và loại bằng chữ nhạt. Nhấn hàng để chọn ngay; nhấn **Sửa** để chỉnh sửa. Add provider mở danh sách loại:
+
+- **OpenAI compatible**: tên, base URL, model ID, API key.
+- **Gemini**: tên, model ID, Google AI Studio API key; endpoint có sẵn. Dùng [OpenAI compatibility endpoint chính thức của Google](https://ai.google.dev/gemini-api/docs/openai/), chưa dùng native GenerateContent/Interactions. Các khả năng riêng như grounding chưa được triển khai.
+
+Mỗi provider giữ key riêng trong Keychain. Để trống key khi sửa sẽ giữ key cũ. Streaming áp dụng cho provider đang chọn. Profile cũ thiếu type được xem là OpenAI compatible.
+
+Chat dùng renderer block native:
+
+- Code có box, header **Code** hoặc ngôn ngữ do model ghi, nút **Copy** sao chép nội dung không kèm fence/header. Không bắt buộc có language tag. Cuộn ngang với dòng dài.
+- Bảng Markdown có header, viền từng ô, căn trái/giữa/phải theo delimiter và cuộn ngang khi rộng.
+- Đậm/nghiêng, tiêu đề, danh sách, trích dẫn và liên kết vẫn hiển thị trong phần text. Không dùng WebView, không chạy HTML/JS hoặc tự tải ảnh. Chưa hỗ trợ LaTeX và tô màu syntax code.
+- Hỗ trợ block đang nhận dở trong streaming. Nội dung Markdown gốc vẫn lưu vào SQLite.
+
+Các chức năng ghim, thứ tự truy cập, vuốt xóa và lịch sử riêng từ 0.4.0 được giữ lại.
+
+Kiểm tra parser trên WSL:
+
+```bash
+g++ -std=c++17 -Wall -Wextra -Werror tests/markdown_test.cpp -o /tmp/agenthome-markdown-test
+/tmp/agenthome-markdown-test
+```
+
+Sau khi cài trên iPhone: kiểm tra chuyển provider, form theo type và Streaming; yêu cầu AI trả về code fence không language tag, code Python và một bảng có ít nhất 3 cột. Kiểm tra Copy bằng cách dán vào ô nhập, cuộn ngang code/bảng, cả chế độ streaming và không streaming. Gemini cần key hợp lệ của người dùng để kiểm thử mạng.
+
+## Đã triển khai
+
+- Nút **Cài đặt** chứa cấu hình API và mục **Device info**. Nút **Quay lại** mở danh sách hội thoại; nút **Mới** tạo hội thoại trống với context riêng. Hội thoại cũ được giữ trong **Hội thoại cũ**, tiêu đề chat mới lấy từ tin đầu tiên.
+- App UIKit có icon riêng, bong bóng chat (bạn bên phải, AI bên trái), ô nhập bo góc, nền mờ và nút Dán riêng tránh menu hệ thống gây crash trên thiết bị thử nghiệm.
+- Streaming SSE, nút Dừng, trạng thái chờ/trả lời/gọi công cụ; có thể tắt Streaming trong API nếu provider không hỗ trợ. Phần văn bản nhận được trước khi dừng hoặc lỗi mạng được lưu kèm nhãn gián đoạn.
+- API tương thích OpenAI Chat Completions, hỗ trợ endpoint tùy chỉnh qua HTTPS và tool calling; model cần hỗ trợ trường `tools`.
+- AI được gọi duy nhất công cụ `system_info`, tối đa 3 vòng và 4 lời gọi mỗi vòng. Nút **Thiết bị** gọi cùng công cụ qua IPC.
+- Daemon `agenthomed` chạy với UID `mobile`, nhận JSON qua Unix socket, kiểm tra UID đầu bên kia và chỉ cho phép các phương thức định nghĩa sẵn.
+- SQLite lưu riêng từng hội thoại, tải tối đa 100 tin gần nhất trong giới hạn khung IPC; giới hạn context gửi API khoảng 16.000 ký tự. API key lưu Keychain, không lưu trong SQLite.
+- IPC có giới hạn kích thước và timeout. Không có cổng TCP lắng nghe.
+
+**Chưa triển khai:** scheduler/checkpoint nhiệm vụ, memory ngữ nghĩa, phê duyệt quyền tương tác, tool đặc quyền, provider adapter Anthropic/Gemini, UI Automation, MCP, Live2D và multi-agent. Bản đầu dùng allowlist cố định thay cho Risk Engine đầy đủ. Khi đóng app, hội thoại được lưu nhưng yêu cầu AI đang chạy chưa được chuyển sang daemon; daemon chỉ phục vụ IPC và lưu dữ liệu.
+
+## Build
+
+```bash
+export THEOS=/home/luoplayer/theos
+make package FINALPACKAGE=1
+```
+
+Cần SDK iPhoneOS15.6 và toolchain arm64 trong Theos. Nếu Theos ở vị trí khác, đặt `THEOS` tương ứng. Gói `.deb` xuất hiện trong `packages/`. Không cần Xcode để build bản này.
+
+## Cài và chạy trên iPhone
+
+Thay `PHONE_IP` bằng IP máy. Thiết bị cần đang jailbreak, đã cài OpenSSH. Chép gói mới nhất bằng tên thực tế ở `packages/`:
+
+```bash
+scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.5.1_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
+ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP
+```
+
+Trong shell iPhone, dùng quyền quản trị để cài gói (ví dụ `sudo`, nếu đã cấu hình):
+
+```bash
+sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.5.1_iphoneos-arm64.deb
+sudo launchctl bootstrap system /var/jb/Library/LaunchDaemons/dev.agenthome.daemon.plist
+sudo launchctl kickstart -k system/dev.agenthome.daemon
+sudo uicache -p /var/jb/Applications/AgentHome.app
+```
+
+Nếu service đã được bootstrap, bỏ qua thông báo “already loaded” và dùng `kickstart`. Gói chưa có script tự bootstrap; các lệnh này là bước cài lần đầu. Đường dẫn `/var/jb` phụ thuộc bootstrap rootless trên thiết bị và cần được xác minh. Sau reboot, kích hoạt lại jailbreak trước khi sử dụng.
+
+Mở **Agent Home**, chọn **API**, nhập base URL (ví dụ `https://host/v1`) hoặc URL đầy đủ đến `/v1/chat/completions`, model ID và API key. Mục **Cài đặt → Device info** kiểm tra daemon mà chưa cần API. Sau đó hỏi AI “Máy còn bao nhiêu dung lượng?” để thử vòng gọi công cụ.
+
+## Nâng cấp 0.3.0 và kiểm tra hội thoại
+
+Sau khi cài gói, khởi động lại daemon để nâng cấp SQLite:
+
+```bash
+sudo launchctl kickstart -k system/dev.agenthome.daemon
+```
+
+Nếu daemon đang chạy thủ công và chưa được đăng ký với launchd, dừng tiến trình bằng `pkill -x agenthomed`, sau đó chạy `bootstrap` và `kickstart` như bước cài lần đầu. Nếu không restart, app mới sẽ không gọi được `chat.create` / `chat.conversations`.
+
+Kiểm tra: **Quay lại** hiển thị lịch sử cũ; **Mới** mở chat trống; gửi một tin rồi quay lại để thấy tiêu đề; mở hai chat khác nhau để xác nhận nội dung riêng; đóng/mở app để tiếp tục chat đang chọn. **Cài đặt → Device info** hiển thị thông tin thiết bị. Khi đang trả lời hoặc lưu dữ liệu, nút điều hướng tạm khóa; nhấn **Dừng** trước khi đổi chat.
+
+Migration được kiểm tra trên cả database rỗng và schema v0.2 có dữ liệu, bao gồm chạy lại migration và tách lịch sử. `shared/AHDatabase.h` chứa migration và SQL dùng chung với daemon. Bộ kiểm tra host: `tests/database_test.cpp` (cần header SQLite và thư viện SQLite hệ thống).
+
+## Kiểm tra streaming và giao diện
+
+Kiểm tra parser SSE trên WSL, không gọi API:
+
+```bash
+g++ -std=c++17 -Wall -Wextra -Werror tests/sse_test.cpp -o /tmp/agenthome-sse-test
+/tmp/agenthome-sse-test
+```
+
+Trên iPhone sau khi nâng cấp:
+
+1. Mở lại app: lịch sử cũ vẫn còn, tin của bạn căn phải và AI căn trái.
+2. Gửi “Viết một đoạn văn tiếng Việt khoảng 200 từ”: kiểm tra chữ hiện dần, dấu và emoji không lỗi.
+3. Nhấn Dừng giữa câu trả lời: phần nhận được được đánh dấu `[Đã dừng]`, có thể gửi tin tiếp. Mở lại app để kiểm tra phần đã lưu.
+4. Hỏi “Dùng công cụ kiểm tra máy còn bao nhiêu dung lượng”: kiểm tra trạng thái gọi công cụ và kết quả.
+5. Tắt Streaming trong API rồi thử lại để kiểm tra chế độ JSON thông thường.
+
+Giới hạn: yêu cầu AI vẫn chạy trong tiến trình app, chưa có tiếp tục tác vụ khi app bị đóng. Dừng hủy request trên thiết bị; provider có thể vẫn tính phí phần đã xử lý. Streaming có thể tới theo cụm nếu proxy buffer dữ liệu. Chỉ lưu phần nhận được khi dừng chủ động hoặc lỗi được xử lý, chưa checkpoint từng token khi app bị kill. Phần reasoning riêng của provider không được hiển thị/lưu.
+
+## Kiểm tra IPC trên thiết bị
+
+Build công cụ kiểm tra trực tiếp bằng cùng UID `mobile` với daemon:
+
+```bash
+make -C tests all
+scp -i ~/.ssh/ulp_iphone tests/.theos/obj/ahcheck mobile@PHONE_IP:/var/mobile/
+ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP 'chmod 700 /var/mobile/ahcheck; /var/mobile/ahcheck'
+```
+
+Binary chép trực tiếp có thể bị Dopamine chặn thực thi (đã gặp mã thoát 137); khi đó cần cài công cụ bằng gói được bootstrap tin cậy trước khi chạy, hoặc kiểm tra qua Cài đặt → Device info trong app. Công cụ kiểm tra đọc thông tin hệ thống, đọc lịch sử và từ chối method ngoài allowlist. Không dùng SSH socket forwarding để kiểm tra xác thực UID: tiến trình sshd kết nối socket có thể mang UID khác `mobile` và bị từ chối.
+
+`tests/ipc_smoke.py` dùng được khi Python chạy trực tiếp cùng UID trên thiết bị. `--write-test` thêm một tin thử vào lịch sử. Kiểm tra thêm: gửi chat, đóng/mở app để kiểm tra lịch sử; thử key sai và daemon dừng để kiểm tra hiển thị lỗi; khởi động lại daemon để kiểm tra SQLite vẫn còn dữ liệu.
+
+## Dữ liệu và phạm vi quyền
+
+Dữ liệu nằm trong `/var/mobile/Library/AgentHome/`, thư mục 0700 và socket 0600. SQLite chưa mã hóa riêng. App chạy ngoài container để dùng socket của daemon; entitlement này cần kiểm chứng trên Dopamine thực tế. Tiến trình khác cùng UID mobile cũng có thể kết nối socket: kiểm tra UID không phải cơ chế cô lập giữa các app jailbreak. Vì vậy bản này chỉ cung cấp tool đọc trạng thái và đọc/ghi hội thoại, tuyệt đối chưa đưa shell/root vào giao thức.
+
+Khi chat, context gửi tới endpoint đã cấu hình; thông tin thiết bị chỉ gửi khi model yêu cầu tool. Keychain dùng `WhenUnlockedThisDeviceOnly`; đây chưa phải hệ thống AI nền khi máy khóa. Không ghi key vào log. Lịch sử tool call trung gian chưa được lưu để replay/audit; chỉ tin user/assistant được lưu.
+
+0.5.2 thêm mốc 12 pt và giữ nguyên cỡ chữ đã chọn khi nâng cấp.
