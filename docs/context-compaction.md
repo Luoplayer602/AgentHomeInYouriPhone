@@ -93,3 +93,7 @@ Kiểm tra:
 - `agenthomed --self-test-memory` là kiểm tra native bằng dữ liệu giả, chạy trước khi mở DB/socket, không gọi API. Kiểm tra JSON thật qua Foundation, quote sai nguồn, phủ định, evidence bắt buộc, carry-forward không lồng JSON, preview và ngân sách. Sau khi cài gói mới có thể chạy trên iPhone: `/var/jb/usr/bin/agenthomed --self-test-memory`.
 
 Bản native đã build; chưa chạy self-test native và ca 244 tin/API thật trên iPhone cho version 0.12.0. Không coi kiểm tra core/schema là bằng chứng chất lượng trả lời đã đạt 9/9. Cần chạy lại đối chứng sau khi cài, vì model vẫn có thể bỏ qua hoặc diễn giải sai dữ kiện dù nguồn đã được giữ.
+
+### Kết quả kiểm tra thiết bị 0.12.0
+
+Self-test native trên iPhone đã **PASS**. Tuy nhiên cả ca gốc 244 tin lẫn ca trạng thái ngắn/dữ liệu sạch đều chưa tạo được candidate ready trên provider hiện tại vì output bị validator từ chối. Chưa chạy recall sau compact cho bản này. Chi tiết và giới hạn phép thử ở [báo cáo test thiết bị](live-test-2026-10-30.md); bằng chứng tại `tests/fixtures/memory-v012-live.json`. Kế hoạch tiếp: model chọn source ID, daemon dựng trích dẫn; giữ nguyên kiểm tra nguồn và không bật auto-compact.

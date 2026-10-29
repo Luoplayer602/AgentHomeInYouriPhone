@@ -1,0 +1,43 @@
+{
+  "original_case": {
+    "version": "0.12.0",
+    "model": "deepseek-r1-550b",
+    "case": "original-244-long-factual-messages",
+    "native_self_test": "passed",
+    "state": "failed",
+    "error": "Trích dẫn memory không khớp nguồn; trạng thái/quyền phải giữ nguyên toàn bộ tin nguồn.",
+    "active_preserved": {},
+    "selected_source_before_chars": "141282",
+    "interpretation": "validator rejection, not a successful compaction",
+    "usable_compaction_passed": false
+  },
+  "short_facts_with_untrusted_payload": {
+    "state": "failed",
+    "error": "Trích dẫn chứa dòng có nhãn credential; hãy rút gọn nguồn trước khi compact.",
+    "before_chars": "138327",
+    "active": {}
+  },
+  "clean_short_facts_case": {
+    "state": "failed",
+    "error": "Trích dẫn memory không khớp nguồn; trạng thái/quyền phải giữ nguyên toàn bộ tin nguồn.",
+    "before_chars": 138226,
+    "after_chars": 0,
+    "active": {},
+    "usable_compaction_passed": false
+  },
+  "test_scope": {
+    "interface": "daemon Unix IPC over SSH, not UIKit gestures",
+    "profile_model": "deepseek-r1-550b",
+    "saved_profile_context": 0,
+    "discovered_window": 32768,
+    "window_source": "unknown model; app fallback",
+    "request_only_context_override": 200000,
+    "chat_input_estimate_range": [
+      51775,
+      52793
+    ],
+    "full_200k_verified": false,
+    "recall_test": "not run: no ready candidate",
+    "runtime_changed": false
+  }
+}
