@@ -16,6 +16,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
 @property (nonatomic,strong) NSDictionary *config;
 @property (nonatomic,strong) NSMutableString *partial;
 @property NSInteger round;
+@property (nonatomic,strong) NSMutableString *reasoning;
 @property (nonatomic,copy) NSString *activeKey;
 @property (nonatomic,strong) AHActivityLease *lease;
 @property NSTimeInterval lastCheckpoint;
@@ -38,7 +39,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
 - (void)recoverAndStart {
     // Remote request outcome cannot be inferred after restart. Never replay it.
     [self sql:@"BEGIN IMMEDIATE" values:@[]];
-    [self sql:@"INSERT INTO messages(role,content,conversation_id) SELECT 'assistant',substr(a.partial,1,31900)||char(10)||'[Daemon khởi động lại; phản hồi gián đoạn]',t.conversation_id FROM tasks t JOIN ai_runs a ON a.task_id=t.id WHERE t.tool='chat.ai' AND t.state='running' AND a.partial<>''" values:@[]];
+    [self sql:@"INSERT INTO messages(role,content,conversation_id) SELECT 'assistant',substr(a.partial,1,63800)||char(10)||'[Daemon khởi động lại; phản hồi gián đoạn]',t.conversation_id FROM tasks t JOIN ai_runs a ON a.task_id=t.id WHERE t.tool='chat.ai' AND t.state='running' AND a.partial<>''" values:@[]];
     [self sql:@"INSERT INTO task_events(task_id,state,note) SELECT id,'failed','Daemon restarted; remote request not replayed' FROM tasks WHERE tool='chat.ai' AND state='running'" values:@[]];
     [self sql:@"UPDATE tasks SET state='failed',result='Daemon restarted; partial response kept',updated_at=CURRENT_TIMESTAMP WHERE tool='chat.ai' AND state='running'" values:@[]];
     [self sql:@"COMMIT" values:@[]];
@@ -52,7 +53,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         if([self rows:@"SELECT id FROM tasks WHERE conversation_id=? AND tool='chat.ai' AND state IN ('queued','running')" values:@[conversation]].count) { *error=@"Conversation already has an active AI task"; return nil; }
         NSString *urlError=nil; NSURL *url=[config[@"endpoint"] isKindOfClass:NSString.class]?AHChatURL(config[@"endpoint"],&urlError):nil;
         if(!url || ![config[@"id"] isKindOfClass:NSString.class] || ![config[@"model"] isKindOfClass:NSString.class] || ![config[@"model"] length]) { *error=urlError ?: @"Invalid provider"; return nil; }
-        NSDictionary *snapshot=@{@"id":config[@"id"],@"endpoint":url.absoluteString,@"model":config[@"model"],@"disableStreaming":@([config[@"disableStreaming"] boolValue])};
+        NSDictionary *snapshot=@{@"id":config[@"id"],@"endpoint":url.absoluteString,@"model":config[@"model"],@"disableStreaming":@([config[@"disableStreaming"] boolValue]),@"max_output_tokens":@([config[@"max_output_tokens"] respondsToSelector:@selector(integerValue)] ? MAX(256,MIN(32768,[config[@"max_output_tokens"] integerValue])):8192)};
         BOOL ok=[self sql:@"BEGIN IMMEDIATE" values:@[]];
         if(ok) ok=[self sql:@"INSERT INTO tasks(id,conversation_id,tool) VALUES (?,?,'chat.ai')" values:@[identifier,conversation]];
         if(ok) ok=[self sql:@"INSERT INTO messages(role,content,conversation_id) VALUES ('user',?,?)" values:@[text,conversation]];
@@ -68,7 +69,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
     }
     if([method isEqual:@"ai.snapshot"]) {
         NSString *conversation=params[@"conversation_id"]; if(![conversation isKindOfClass:NSString.class]) { *error=@"Invalid conversation"; return nil; }
-        NSDictionary *row=[self rows:@"SELECT t.id,t.state,t.result,a.partial FROM tasks t JOIN ai_runs a ON a.task_id=t.id WHERE t.conversation_id=? ORDER BY t.rowid DESC LIMIT 1" values:@[conversation]].firstObject;
+        NSDictionary *row=[self rows:@"SELECT t.id,t.state,t.result,a.partial,a.reasoning FROM tasks t JOIN ai_runs a ON a.task_id=t.id WHERE t.conversation_id=? ORDER BY t.rowid DESC LIMIT 1" values:@[conversation]].firstObject;
         return row ?: @{};
     }
     if([method isEqual:@"ai.cancel"]) {
@@ -86,6 +87,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
     if(!run) return;
     if(AHTaskTransition(self.db,[run[@"id"] UTF8String],"queued","running","","Provider request started")!=SQLITE_OK) return;
     self.activeID=run[@"id"]; self.config=parse(run[@"config"]); self.context=[parse(run[@"context"]) mutableCopy]; self.partial=[NSMutableString string]; self.round=[run[@"round"] integerValue];
+    self.reasoning=[NSMutableString string];
     self.activeKey=AHReadKey(self.config[@"id"]);
     self.lease=[AHActivityLease new]; int32_t power=[self.lease begin];
     NSString *note=[NSString stringWithFormat:@"Power assertion result: %d (0=accepted); display may lock",(int)power];
@@ -98,12 +100,19 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
 }
 - (void)checkpoint {
     [self sql:@"UPDATE ai_runs SET partial=?,context=?,round=? WHERE task_id=?" values:@[self.partial,json(self.context),@(self.round),self.activeID]];
+    [self sql:@"UPDATE ai_runs SET reasoning=? WHERE task_id=?" values:@[self.reasoning ?: @"",self.activeID]];
     self.lastCheckpoint=NSDate.timeIntervalSinceReferenceDate;
 }
 - (void)request {
     NSString *key=self.activeKey;
     if(!key.length) { [self finish:@"failed" error:@"Daemon không đọc được API key khi bắt đầu lượt. Mở khóa thiết bị rồi gửi lại." answer:nil]; return; }
     NSString *identifier=self.activeID; self.provider=[AHProvider new];
+    self.provider.maxOutputTokens=[self.config[@"max_output_tokens"] unsignedIntegerValue] ?: 8192;
+    __weak AHAgentRuntime *weakSelf=self;
+    self.provider.reasoningDelta=^(NSString *delta){
+        AHAgentRuntime *self=weakSelf; if(!self || ![self.activeID isEqual:identifier]) return; [self.reasoning appendString:delta];
+        if(NSDate.timeIntervalSinceReferenceDate-self.lastCheckpoint>0.2) [self checkpoint];
+    };
     NSDictionary *tool=@{@"type":@"function",@"function":@{@"name":@"system_info",@"description":@"Read OS and disk space. Read-only risk 0.",@"parameters":@{@"type":@"object",@"properties":@{},@"additionalProperties":@NO}}};
     [self.provider sendTo:[NSURL URLWithString:self.config[@"endpoint"]] model:self.config[@"model"] key:key messages:self.context tools:@[tool] streaming:![self.config[@"disableStreaming"] boolValue] delta:^(NSString *delta){
         if(![self.activeID isEqual:identifier]) return; [self.partial appendString:delta];
@@ -112,6 +121,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         if(![self.activeID isEqual:identifier]) return;
         NSString *finish=[NSString stringWithFormat:@"Provider finish_reason: %@",self.provider.finishCause ?: @"not supplied"];
         AHTaskEvent(self.db,identifier.UTF8String,"running",finish.UTF8String); self.provider=nil;
+        if(!self.reasoning.length && [message[@"reasoning_content"] isKindOfClass:NSString.class]) [self.reasoning appendString:[message[@"reasoning_content"] substringToIndex:MIN([message[@"reasoning_content"] length],(NSUInteger)64000)]];
         if(error) {
             if(!self.partial.length && [message[@"content"] isKindOfClass:NSString.class]) [self.partial appendString:message[@"content"]];
             [self finish:@"failed" error:error.localizedDescription answer:nil]; return;
@@ -128,15 +138,17 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
             for(NSDictionary *call in calls) { NSDictionary *result=self.tool(@"system.info"); [self.context addObject:@{@"role":@"tool",@"tool_call_id":call[@"id"],@"content":json(result ?: @{@"error":@"Tool failed"})}]; AHTaskEvent(self.db,identifier.UTF8String,"running","Executed system.info (risk 0)"); }
             self.round++; self.partial=[NSMutableString string]; [self checkpoint]; [self request]; return;
         }
-        id answer=message[@"content"]; if(![answer isKindOfClass:NSString.class] || ![answer length] || [answer length]>32000) { [self finish:@"failed" error:@"Invalid provider answer" answer:nil]; return; }
+        id answer=message[@"content"]; if(![answer isKindOfClass:NSString.class] || ![answer length]) { [self finish:@"failed" error:@"Invalid provider answer" answer:nil]; return; }
+        if([answer length]>64000) { self.partial=[[answer substringToIndex:64000] mutableCopy]; [self finish:@"failed" error:@"Câu trả lời vượt giới hạn 64.000 ký tự; đã giữ phần nhận được." answer:nil]; return; }
         [self finish:@"completed" error:nil answer:answer];
     }];
 }
 - (void)finish:(NSString *)state error:(NSString *)error answer:(NSString *)answer {
     NSString *identifier=self.activeID;
     NSString *text=answer;
-    if(!text.length && self.partial.length) text=[[self.partial substringToIndex:MIN(self.partial.length,(NSUInteger)31900)] stringByAppendingFormat:@"\n\n[%@]",error ?: state];
-    if(text.length>32000) text=[text substringToIndex:32000];
+    if(!text.length && self.partial.length) text=[[self.partial substringToIndex:MIN(self.partial.length,(NSUInteger)63800)] stringByAppendingFormat:@"\n\n[%@]",error ?: state];
+    if(text.length>64000) text=[text substringToIndex:64000];
+    [self checkpoint];
     BOOL ok=[self sql:@"BEGIN IMMEDIATE" values:@[]];
     if(ok && text.length) ok=[self sql:@"INSERT INTO messages(role,content,conversation_id) SELECT 'assistant',?,conversation_id FROM tasks WHERE id=? AND state='running'" values:@[text,identifier]];
     if(ok) ok=[self sql:@"UPDATE tasks SET state=?,result=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND state='running'" values:@[state,error ?: @"",identifier]];
@@ -146,7 +158,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         [self sql:@"UPDATE tasks SET state='failed',result='Could not commit assistant response' WHERE id=? AND state='running'" values:@[identifier]];
     }
     [self.lease end]; self.lease=nil; self.activeKey=nil;
-    self.activeID=nil; self.context=nil; self.config=nil; self.partial=nil; self.provider=nil;
+    self.activeID=nil; self.context=nil; self.config=nil; self.partial=nil; self.reasoning=nil; self.provider=nil;
     dispatch_async(dispatch_get_main_queue(),^{ [self startNext]; });
 }
 @end

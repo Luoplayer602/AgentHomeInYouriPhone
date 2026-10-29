@@ -8,6 +8,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
 @property (nonatomic, strong) NSURLSessionDataTask *task;
 @property (nonatomic, strong) NSMutableData *body;
 @property (nonatomic, strong) NSMutableString *text;
+@property (nonatomic,strong) NSMutableString *reasoning;
 @property (nonatomic, strong) NSMutableDictionary *calls;
 @property (nonatomic, strong) NSError *failure;
 @property (nonatomic, copy) NSString *key;
@@ -25,16 +26,16 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
 @implementation AHProvider
 - (void)sendTo:(NSURL *)url model:(NSString *)model key:(NSString *)key messages:(NSArray *)messages tools:(NSArray *)tools streaming:(BOOL)streaming delta:(void (^)(NSString *))delta completion:(void (^)(NSDictionary *, NSError *))completion {
     self.url = url; self.key = key; self.delta = delta; self.completion = completion;
-    self.body = [NSMutableData data]; self.text = [NSMutableString string]; self.calls = [NSMutableDictionary dictionary];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url]; request.HTTPMethod = @"POST"; request.timeoutInterval = 90;
+    self.body = [NSMutableData data]; self.text = [NSMutableString string]; self.calls = [NSMutableDictionary dictionary]; self.reasoning=[NSMutableString string];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url]; request.HTTPMethod = @"POST"; request.timeoutInterval = 180;
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     [request setValue:streaming ? @"text/event-stream" : @"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
     NSError *error = nil;
-    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"model":model, @"messages":messages, @"tools":tools, @"stream":@(streaming), @"max_tokens":@(self.maxOutputTokens ?: 4096)} options:0 error:&error];
+    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"model":model, @"messages":messages, @"tools":tools, @"stream":@(streaming), @"max_tokens":@(self.maxOutputTokens ?: 8192)} options:0 error:&error];
     if (error) { completion(nil, error); return; }
     NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
-    config.timeoutIntervalForResource = 180;
+    config.timeoutIntervalForResource = 600;
     // Serial main queue keeps cancellation and UI callbacks ordered.
     self.session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
     self.task = [self.session dataTaskWithRequest:request]; [self.task resume];
@@ -75,9 +76,14 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
     id delta = [choice isKindOfClass:NSDictionary.class] ? choice[@"delta"] : nil;
     if (![delta isKindOfClass:NSDictionary.class]) { [self fail:@"SSE delta không hợp lệ."]; return; }
     if ([choice[@"finish_reason"] isKindOfClass:NSString.class]) { self.finishReason = YES; self.finishCause=choice[@"finish_reason"]; }
+    id thought=delta[@"reasoning_content"] ?: delta[@"reasoning"];
+    if([thought isKindOfClass:NSString.class] && [thought length]) {
+        if(self.reasoning.length+[thought length]>64000) { [self fail:@"Reasoning vượt giới hạn 64.000 ký tự."]; return; }
+        [self.reasoning appendString:thought]; if(self.reasoningDelta) self.reasoningDelta(thought);
+    }
     id content = delta[@"content"];
     if ([content isKindOfClass:NSString.class]) {
-        if (self.text.length + [content length] > 32000) { [self fail:@"Câu trả lời vượt giới hạn 32.000 ký tự."]; return; }
+        if (self.text.length + [content length] > 64000) { [self fail:@"Câu trả lời vượt giới hạn 64.000 ký tự."]; return; }
         [self.text appendString:content]; if (self.delta) self.delta(content);
     }
     id calls = delta[@"tool_calls"];
@@ -124,6 +130,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
         if (!self.doneMarker && !self.finishReason) failure = AHError(@"Luồng phản hồi bị ngắt trước khi hoàn tất.");
         else {
             NSMutableDictionary *assembled = [@{@"role":@"assistant", @"content":[self.text copy]} mutableCopy];
+            if(self.reasoning.length) assembled[@"reasoning_content"]=[self.reasoning copy];
             if (self.calls.count) {
                 NSMutableArray *calls = [NSMutableArray array];
                 for (NSNumber *index in [self.calls.allKeys sortedArrayUsingSelector:@selector(compare:)]) [calls addObject:self.calls[index]];
@@ -148,7 +155,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
     if(!failure && [self.finishCause isEqual:@"length"]) failure=AHError(@"Provider đã chạm giới hạn token đầu ra; câu trả lời chưa hoàn tất. Có thể yêu cầu tiếp tục.");
     if(!failure && [self.finishCause isEqual:@"content_filter"]) failure=AHError(@"Provider đã dừng câu trả lời bằng bộ lọc nội dung.");
     void (^completion)(NSDictionary *, NSError *) = self.completion;
-    self.completion = nil; self.delta = nil; self.key = nil;
+    self.completion = nil; self.delta = nil; self.reasoningDelta=nil; self.key = nil;
     [self.session finishTasksAndInvalidate]; self.session = nil; self.task = nil;
     if (completion) completion(message, failure);
 }

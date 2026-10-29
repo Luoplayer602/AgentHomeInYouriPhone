@@ -17,7 +17,7 @@ def call(path, method, params):
         for offset in range(0, len(frame), 7):
             client.sendall(frame[offset:offset + 7])
         with client.makefile('rb') as stream:
-            reply = json.loads(stream.readline(256 * 1024))
+            reply = json.loads(stream.readline(2 * 1024 * 1024))
     assert reply['id'] == identifier, reply
     return reply
 

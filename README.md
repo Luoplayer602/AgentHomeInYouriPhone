@@ -1,6 +1,31 @@
-# Agent Home — nền tảng v0.7.1
+# Agent Home — nền tảng v0.8.0
 
 App iOS và daemon độc lập dành cho iPhone jailbreak rootless. Đích hiện tại: iPhone 6s, iOS 15, Dopamine; build bằng Theos trong WSL2.
+
+## Bản 0.8.0 — Webview và reasoning từ provider
+
+**Cài đặt → Webview**: Bật Webview (mặc định tắt), port 1024–65535 (mặc định 8765), password và Cho phép tương tác (mặc định tắt). Lưu sẽ áp dụng ngay, không cần restart. Port lỗi được hiển thị; không tự mở port Internet/NAT.
+
+- Mật khẩu trống: chế độ công cộng, ai kết nối được port đều đọc được hội thoại/reasoning. Tương tác bật cho phép họ tạo chat, gửi và dừng AI. UI có cảnh báo rõ. Không có xác nhận phụ.
+- Mật khẩu có giá trị: PBKDF2-HMAC-SHA256 salt ngẫu nhiên, 120.000 vòng; chỉ verifier được lưu SQLite. Login có giới hạn lần thử, cookie HttpOnly/SameSite=Strict hết hạn sau một giờ. Đổi cấu hình hủy session/luồng cũ.
+- HTTP thuần: dùng mạng tin cậy/Tailscale hoặc SSH tunnel. Không nhập mật khẩu này trên mạng công cộng không mã hóa. Web không trả API key và không có endpoint cấu hình server/provider/shell.
+- Cần nhập lại mật khẩu khi mở lại màn hình cấu hình nếu muốn giữ chế độ có mật khẩu; để trống khi Lưu sẽ chuyển công cộng.
+
+Sau khi cài/restart daemon, bật Webview trong app, lưu và mở:
+
+```text
+http://100.65.210.88:8765
+```
+
+Web có danh sách chat, Markdown/code Copy/bảng, EventSource SSE cập nhật snapshot khi thay đổi, khung Thinking thu gọn, gửi/dừng/tạo chat nếu bật tương tác. Reasoning là nội dung provider thực sự phát qua `reasoning_content` hoặc chuỗi `reasoning`; không truy cập được suy nghĩ nội bộ không có trong API. Non-streaming chỉ hiện reasoning sau khi provider trả xong. Không tự bật thinking mode bằng tham số đặc thù của model. Tham khảo [DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/).
+
+**Output dài hơn:** mỗi provider có Max output tokens, mặc định 8.192, cho phép 256–32.768 tùy model. App giới hạn output và reasoning mỗi phần 64.000 ký tự, response mạng 2 MB; timeout chờ dữ liệu 180 giây/request tổng 600 giây, watchdog lượt 15 phút. Đây là mức trần, không ép model chạy đủ một phút hoặc tự gửi “tiếp tục”. Chạm giới hạn vẫn báo rõ. Context hiện vẫn dùng ngân sách ký tự riêng như các bản trước; reasoning không tự đưa vào transcript trả lời.
+
+**Kiểm tra thiết bị:** đăng nhập sai/đúng, đổi password thì session cũ bị hủy; tắt tương tác rồi thử gửi bằng web phải bị từ chối; bật tương tác và thử gửi/dừng; để password trống kiểm tra nhãn CÔNG CỘNG; tắt Webview thì port và SSE phải đóng; kiểm tra stream reasoning trên model có cung cấp field tương ứng. Bắt đầu lượt mới qua web vẫn cần Keychain đọc được (thường cần mở khóa máy lúc bắt đầu); lượt đã bắt đầu tiếp tục dùng key trong RAM.
+
+Các API giới hạn: GET /api/status, /api/conversations, /api/messages?conversation_id=..., /api/events?conversation_id=...; POST /api/login, /api/create, /api/submit, /api/cancel. POST tương tác cần JSON + cookie (nếu có mật khẩu) + header X-AH-CSRF lấy từ /api/status. Host phải là IP trực tiếp/localhost với đúng port; không cung cấp CORS, kiểm tra Origin/CSRF, giới hạn framing và số kết nối. Mỗi SSE stream kết thúc sau khoảng 30 giây rồi EventSource tự nối lại.
+
+Kiểm tra host: tests/http_test.cpp kiểm tra parser và các gate Host/Origin/cookie/CSRF; tests/web_ui_test.js chạy JavaScript thực với DOM tối giản để kiểm tra rendering và chế độ chỉ xem; không thay thế test browser/iPhone thực. Runtime SQL và migration test tiếp tục áp dụng.
 
 ## Bản 0.7.1 — chẩn đoán khóa màn hình và phản hồi bị cắt
 
@@ -114,14 +139,14 @@ Cần SDK iPhoneOS15.6 và toolchain arm64 trong Theos. Nếu Theos ở vị tr�
 Thay `PHONE_IP` bằng IP máy. Thiết bị cần đang jailbreak, đã cài OpenSSH. Chép gói mới nhất bằng tên thực tế ở `packages/`:
 
 ```bash
-scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.7.1_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
+scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.8.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
 ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP
 ```
 
 Trong shell iPhone, dùng quyền quản trị để cài gói (ví dụ `sudo`, nếu đã cấu hình):
 
 ```bash
-sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.7.1_iphoneos-arm64.deb
+sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.8.0_iphoneos-arm64.deb
 sudo launchctl bootstrap system /var/jb/Library/LaunchDaemons/dev.agenthome.daemon.plist
 sudo launchctl kickstart -k system/dev.agenthome.daemon
 sudo uicache -p /var/jb/Applications/AgentHome.app

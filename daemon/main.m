@@ -1,5 +1,6 @@
 #import "../shared/AHProtocol.h"
 #import "AHAgentRuntime.h"
+#import "AHWebServer.h"
 #import <sqlite3.h>
 #import "../shared/AHDatabase.h"
 #import <sys/socket.h>
@@ -11,7 +12,9 @@
 #import <errno.h>
 static sqlite3 *db;
 static AHAgentRuntime *agent;
+static AHWebServer *web;
 static id execute(NSString *method, NSDictionary *params, NSString **error) {
+    if([method hasPrefix:@"web."]) return [web handle:method params:params error:error];
     if([method hasPrefix:@"ai."]) return [agent handle:method params:params error:error];
     if ([method isEqual:@"system.info"]) {
         struct statvfs fs;
@@ -101,7 +104,7 @@ static id execute(NSString *method, NSDictionary *params, NSString **error) {
             while (sqlite3_step(s) == SQLITE_ROW) {
                 NSDictionary *item = @{@"role":@((const char *)sqlite3_column_text(s,0)), @"content":@((const char *)sqlite3_column_text(s,1))};
                 NSUInteger size = [NSJSONSerialization dataWithJSONObject:item options:0 error:nil].length + 1;
-                if (bytes + size > 200 * 1024) break;
+                if (bytes + size > 512 * 1024) break;
                 bytes += size; [items addObject:item];
             }
             sqlite3_finalize(s);
@@ -110,7 +113,7 @@ static id execute(NSString *method, NSDictionary *params, NSString **error) {
             return @{@"messages":[[items reverseObjectEnumerator] allObjects],@"total_messages":@(total)};
         }
         NSString *role = params[@"role"], *content = params[@"content"];
-        if (![@[@"user",@"assistant"] containsObject:role] || ![content isKindOfClass:NSString.class] || !content.length || content.length > 32000) { *error = @"Invalid message"; return nil; }
+        if (![@[@"user",@"assistant"] containsObject:role] || ![content isKindOfClass:NSString.class] || !content.length || content.length > 64000) { *error = @"Invalid message"; return nil; }
         s = NULL;
         rc = sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL);
         if (rc == SQLITE_OK) rc = sqlite3_prepare_v2(db, AHInsertSQL, -1, &s, NULL);
@@ -184,6 +187,7 @@ int main(void) { @autoreleasepool {
     if (AHMigrate(db) != SQLITE_OK) return 3;
     if(AHTaskRecover(db)!=SQLITE_OK) return 6;
     agent=[[AHAgentRuntime alloc] initWithDatabase:db tool:^NSDictionary *(NSString *name){ NSString *error=nil; return execute(name,@{},&error); }];
+    web=[[AHWebServer alloc] initWithDatabase:db rpc:^id(NSString *method,NSDictionary *params,NSString **error){ return execute(method,params,error); }];
     [agent recoverAndStart];
     runQueuedTasks();
     int listener = socket(AF_UNIX, SOCK_STREAM, 0);

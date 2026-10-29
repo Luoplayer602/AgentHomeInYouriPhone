@@ -19,6 +19,10 @@ int main() {
     assert(sqlite3_exec(db,"UPDATE tasks SET tool='chat.ai',state='running' WHERE id='remote'",0,0,0)==SQLITE_OK);
     assert(AHTaskRecover(db)==SQLITE_OK);
     assert(count(db,"SELECT count(*) FROM tasks WHERE id='remote' AND state='running'")==1);
+    // Upgrade the pre-reasoning ai_runs schema without losing its partial.
+    assert(sqlite3_exec(db,"DROP TABLE ai_runs; CREATE TABLE ai_runs(task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,config TEXT NOT NULL,context TEXT NOT NULL,partial TEXT NOT NULL DEFAULT '',round INTEGER NOT NULL DEFAULT 0); INSERT INTO ai_runs(task_id,config,context,partial) VALUES ('remote','{}','[]','saved partial')",0,0,0)==SQLITE_OK);
+    assert(AHMigrate(db)==SQLITE_OK);
+    assert(count(db,"SELECT count(*) FROM ai_runs WHERE task_id='remote' AND partial='saved partial' AND reasoning=''")==1);
     sqlite3_close(db);
     // Reopen an actual file to ensure queued work survives process/database closure.
     const char *path="/tmp/agenthome-task-test.sqlite"; std::remove(path);

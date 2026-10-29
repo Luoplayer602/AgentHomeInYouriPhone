@@ -1,6 +1,6 @@
 Package: dev.agenthome.iphone
 Name: Agent Home
-Version: 0.7.1
+Version: 0.8.0
 Architecture: iphoneos-arm64
 Description: Independent iPhone agent foundation with local IPC and persistent chat
 Maintainer: Agent Home

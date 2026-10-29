@@ -124,6 +124,7 @@
     [super viewWillAppear:animated];
     self.input.font=[UIFont systemFontOfSize:AHChatFontSize()];
     [self render];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ [AHClient call:@"web.profile" params:@{@"profile":AHActiveProfile()} error:nil]; });
     [self startPolling];
     if(!self.busy) self.statusLabel.text=[NSString stringWithFormat:@"%@ · %@",AHActiveProfile()[@"name"],AHActiveProfile()[@"model"]];
 }
@@ -232,7 +233,7 @@
             NSString *partial=active?snapshot[@"partial"]:@""; if(![self.draft isEqual:partial]) changed=YES;
             self.draft=[(partial ?: @"") mutableCopy]; self.aiTaskID=snapshot[@"id"];
             self.running=active; [self setWorking:active];
-            self.statusLabel.text=active?([state isEqual:@"queued"]?@"Đang chờ daemon…":@"AI đang chạy trong daemon…") : ([state isEqual:@"failed"]?snapshot[@"result"]:@"Sẵn sàng · daemon");
+            self.statusLabel.text=active?([state isEqual:@"queued"]?@"Đang chờ daemon…":([snapshot[@"reasoning"] length] && ![snapshot[@"partial"] length]?@"Provider đang reasoning…":@"AI đang chạy trong daemon…")) : ([state isEqual:@"failed"]?snapshot[@"result"]:@"Sẵn sàng · daemon");
             if(changed) [self render];
         });
     });

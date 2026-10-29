@@ -4,6 +4,7 @@
 #import "AHProviderConfig.h"
 #import "AHClient.h"
 #import "AHDisplay.h"
+#import "AHWebSettings.h"
 static NSString *AHTypeName(NSDictionary *profile) { return [profile[@"type"] isEqual:@"gemini"] ? @"Gemini" : @"OpenAI compatible"; }
 static void AHSettingsError(UIViewController *owner,NSString *text) {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Agent Home" message:text preferredStyle:UIAlertControllerStyleAlert];
@@ -25,13 +26,15 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
     NSDictionary *profile=nil; for(NSDictionary *p in AHProfiles()) if([p[@"id"] isEqual:self.identifier]) profile=p;
     self.type=profile[@"type"] ?: self.type ?: @"compatible"; self.identifier=self.identifier ?: NSUUID.UUID.UUIDString;
     BOOL gemini=[self.type isEqual:@"gemini"];
-    self.labels=gemini?@[@"Provider name",@"Model ID",@"API key"]:@[@"Provider name",@"Base URL",@"Model ID",@"API key"];
-    NSArray *values=gemini?@[profile[@"name"]?:@"",profile[@"model"]?:@"",@""]:@[profile[@"name"]?:@"",profile[@"endpoint"]?:@"",profile[@"model"]?:@"",@""];
+    self.labels=gemini?@[@"Provider name",@"Model ID",@"Max output tokens",@"API key"]:@[@"Provider name",@"Base URL",@"Model ID",@"Max output tokens",@"API key"];
+    NSString *limit=[profile[@"max_output_tokens"] description] ?: @"8192";
+    NSArray *values=gemini?@[profile[@"name"]?:@"",profile[@"model"]?:@"",limit,@""]:@[profile[@"name"]?:@"",profile[@"endpoint"]?:@"",profile[@"model"]?:@"",limit,@""];
     NSMutableArray *fields=[NSMutableArray array];
     for(NSUInteger i=0;i<self.labels.count;i++) {
         AHInput *field=[AHInput new]; field.text=values[i]; field.font=[UIFont systemFontOfSize:15];
         field.placeholder=self.labels[i];
         if(i==self.labels.count-1) { field.secureTextEntry=YES; field.placeholder=profile?@"Để trống để giữ key":@"Nhập API key"; }
+        if(i==self.labels.count-2) field.keyboardType=UIKeyboardTypeNumberPad;
         if(!gemini && i==1) { field.keyboardType=UIKeyboardTypeURL; field.placeholder=@"https://host/v1"; }
         [fields addObject:field];
     }
@@ -53,12 +56,15 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
     NSMutableArray *values=[NSMutableArray array]; for(UITextField *field in self.fields) [values addObject:[field.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @""];
     BOOL gemini=[self.type isEqual:@"gemini"];
     NSString *name=values[0], *model=values[gemini?1:2], *key=values.lastObject;
+    NSString *limit=values[gemini?2:3];
+    if(!limit.length || [limit rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location!=NSNotFound || limit.integerValue<256 || limit.integerValue>32768) { AHSettingsError(self,@"Max output tokens phải từ 256 tới 32768 (tùy giới hạn model)."); return; }
     NSString *error=nil; NSURL *url=AHChatURL(gemini?@"https://generativelanguage.googleapis.com/v1beta/openai/":values[1],&error);
     if(!name.length || !model.length || !url) { AHSettingsError(self,error ?: @"Cần tên provider và model ID."); return; }
     NSDictionary *old=nil; for(NSDictionary *p in AHProfiles()) if([p[@"id"] isEqual:self.identifier]) old=p;
     if(!key.length && !AHReadKey(self.identifier).length) { AHSettingsError(self,@"Cần API key cho provider mới."); return; }
-    NSDictionary *profile=@{@"id":self.identifier,@"type":self.type,@"name":name,@"endpoint":url.absoluteString,@"model":model,@"disableStreaming":old[@"disableStreaming"] ?: @NO};
+    NSDictionary *profile=@{@"id":self.identifier,@"type":self.type,@"name":name,@"endpoint":url.absoluteString,@"model":model,@"disableStreaming":old[@"disableStreaming"] ?: @NO,@"max_output_tokens":@(limit.integerValue)};
     if(!AHSaveProfile(profile,key,&error)) { AHSettingsError(self,error); return; }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ [AHClient call:@"web.profile" params:@{@"profile":AHActiveProfile()} error:nil]; });
     [self.navigationController popToRootViewControllerAnimated:YES];
 }
 @end
@@ -96,6 +102,7 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
     [tableView deselectRowAtIndexPath:path animated:YES];
     if(path.row==0) { [self.navigationController pushViewController:[AHProviderTypes new] animated:YES]; return; }
     [NSUserDefaults.standardUserDefaults setObject:AHProfiles()[path.row-1][@"id"] forKey:@"activeProvider"];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ [AHClient call:@"web.profile" params:@{@"profile":AHActiveProfile()} error:nil]; });
     [self.navigationController popViewControllerAnimated:YES];
 }
 @end
@@ -147,9 +154,9 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
 - (void)viewDidLoad { [super viewDidLoad]; self.title=@"Cài đặt"; self.tableView.rowHeight=UITableViewAutomaticDimension; self.tableView.estimatedRowHeight=70; self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"Đóng" style:UIBarButtonItemStylePlain target:self action:@selector(close)]; }
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.tableView reloadData]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 4; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section==0?2:1; }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section==0?@"API PROVIDER":section==1?@"HIỂN THỊ":@"DEVICE INFO"; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section==0?@"API PROVIDER":section==1?@"HIỂN THỊ":section==2?@"WEBVIEW":@"DEVICE INFO"; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     if(path.section==1) {
         AHFontCell *font=[[AHFontCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
@@ -157,7 +164,8 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
         font.onChanged=^{ [weak.tableView beginUpdates]; [weak.tableView endUpdates]; }; return font;
     }
     UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
-    if(path.section==2) { cell.textLabel.text=@"Device info"; return cell; }
+    if(path.section==2) { cell.textLabel.text=@"Webview"; cell.detailTextLabel.text=@"Port · Password · Tương tác"; return cell; }
+    if(path.section==3) { cell.textLabel.text=@"Device info"; return cell; }
     if(path.row==0) { cell.textLabel.text=@"Saved providers"; cell.detailTextLabel.text=AHActiveProfile()[@"name"]; }
     else { cell.textLabel.text=@"Streaming"; cell.selectionStyle=UITableViewCellSelectionStyleNone; UISwitch *toggle=[UISwitch new]; toggle.on=![AHActiveProfile()[@"disableStreaming"] boolValue]; [toggle addTarget:self action:@selector(streamChanged:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView=toggle; }
     return cell;
@@ -166,7 +174,8 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
     [tableView deselectRowAtIndexPath:path animated:YES];
     if(path.section==0 && path.row==0) { [self.navigationController pushViewController:[AHSavedProviders new] animated:YES]; return; }
-    if(path.section!=2) return;
+    if(path.section==2) { [self.navigationController pushViewController:[AHWebSettings new] animated:YES]; return; }
+    if(path.section!=3) return;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ NSError *error=nil; NSDictionary *info=[AHClient call:@"system.info" params:@{} error:&error]; NSString *text=info?[NSString stringWithFormat:@"%@\nTrống %.2f GB / %.2f GB\nDaemon UID %@",info[@"os"],[info[@"free_bytes"] doubleValue]/1e9,[info[@"total_bytes"] doubleValue]/1e9,info[@"uid"]]:error.localizedDescription; dispatch_async(dispatch_get_main_queue(),^{ AHSettingsError(self,text); }); });
 }
 @end
