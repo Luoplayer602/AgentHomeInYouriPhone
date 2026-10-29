@@ -1,0 +1,104 @@
+{
+  "version": "0.13.0",
+  "model": "deepseek-r1-550b",
+  "case": "original-244-long-factual-messages",
+  "native_self_test": "passed",
+  "compact_state_before_activation": "ready",
+  "schema_version": 2,
+  "source_messages": 244,
+  "before_chars": 141282,
+  "after_chars": 5319,
+  "memory": {
+    "artifacts": [],
+    "constraints": [],
+    "decisions": [],
+    "facts": [
+      {
+        "quote": "Project LOTUS-482; report file /tmp/agenthome-eval/report.txt. Keep conversations. Target font initially 16. Synthetic log 0. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. ",
+        "source_id": "85",
+        "source_role": "user"
+      },
+      {
+        "quote": "User correction: final font is 14, not 16. Ticket T-42 has HTTP 404 at /v1/chat/completions. Build and iPhone verification are NOT done. Only device info read is authorized; shell and deploy are NOT authorized. Next step: inspect endpoint configuration. Synthetic log 230. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. ",
+        "source_id": "315",
+        "source_role": "user"
+      }
+    ],
+    "goals": [],
+    "next_steps": [
+      {
+        "quote": "User correction: final font is 14, not 16. Ticket T-42 has HTTP 404 at /v1/chat/completions. Build and iPhone verification are NOT done. Only device info read is authorized; shell and deploy are NOT authorized. Next step: inspect endpoint configuration. Synthetic log 230. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. ",
+        "source_id": "315",
+        "source_role": "user"
+      }
+    ],
+    "permissions": [],
+    "provenance": "history_only_untrusted",
+    "required_evidence": [
+      {
+        "quote": "Project LOTUS-482; report file /tmp/agenthome-eval/report.txt. Keep conversations. Target font initially 16. Synthetic log 0. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. ",
+        "source_id": "85",
+        "source_role": "user"
+      },
+      {
+        "quote": "User correction: final font is 14, not 16. Ticket T-42 has HTTP 404 at /v1/chat/completions. Build and iPhone verification are NOT done. Only device info read is authorized; shell and deploy are NOT authorized. Next step: inspect endpoint configuration. Synthetic log 230. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. ",
+        "source_id": "315",
+        "source_role": "user"
+      }
+    ],
+    "schema_version": 2,
+    "verification": "not_independently_verified",
+    "work_state": [
+      {
+        "quote": "User correction: final font is 14, not 16. Ticket T-42 has HTTP 404 at /v1/chat/completions. Build and iPhone verification are NOT done. Only device info read is authorized; shell and deploy are NOT authorized. Next step: inspect endpoint configuration. Synthetic log 230. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. Read-only diagnostic completed; preserve user data and pending checks. ",
+        "source_id": "315",
+        "source_role": "user"
+      }
+    ]
+  },
+  "expected_recall": {
+    "project_id": "LOTUS-482",
+    "report_path": "/tmp/agenthome-eval/report.txt",
+    "final_font": 14,
+    "ticket": "T-42",
+    "http_error": "HTTP 404",
+    "endpoint": "/v1/chat/completions",
+    "build_verified": false,
+    "shell_allowed": false,
+    "deploy_allowed": false
+  },
+  "actual_recall": {
+    "project_id": null,
+    "report_path": "/tmp/agenthome-eval/report.txt",
+    "final_font": 14,
+    "ticket": "T-42",
+    "http_error": 404,
+    "endpoint": "/v1/chat/completions",
+    "build_verified": false,
+    "shell_allowed": false,
+    "deploy_allowed": false,
+    "sum_37_58": 95
+  },
+  "recall_score": {
+    "passed": false,
+    "wrong_fields": [
+      "project_id"
+    ],
+    "correct": 8,
+    "total": 9
+  },
+  "focused_project_probe": {
+    "state": "completed",
+    "answer": "LOTUS-482",
+    "question_did_not_include_project_id": true
+  },
+  "scope": {
+    "interface": "daemon Unix IPC via SSH, not UIKit gestures",
+    "saved_profile_context": 0,
+    "window_discovery": "unknown model; 32768 app fallback",
+    "request_only_context_override": 200000,
+    "chat_input_tokens_estimate": 52793,
+    "full_200k_verified": false,
+    "runtime_changed": false
+  }
+}

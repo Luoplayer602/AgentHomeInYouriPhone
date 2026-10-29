@@ -40,3 +40,12 @@ import ast,re
 instruction=ast.literal_eval(re.search(r'stringWithFormat:@("(?:[^"\\]|\\.)*")',Path('daemon/AHCompactPlan.m').read_text()).group(1))
 assert '"selection_version":1' in instruction and 'permissions' in instruction
 print('PASS eval selection protocol: exact fixture lookup, dedupe, rejects quotes/unknown IDs, filters labeled secrets, complete escaped JSON instruction')
+latest=json.loads(Path('tests/fixtures/memory-v013-live.json').read_text())
+latest_score=module.score_recall(latest['expected_recall'],latest['actual_recall'])
+assert not latest_score['passed'] and latest_score['correct']==8 and latest_score['wrong_fields']==['project_id']
+quotes='\n'.join(entry['quote'] for values in latest['memory'].values() if isinstance(values,list) for entry in values)
+for fact in ['LOTUS-482','/tmp/agenthome-eval/report.txt','/v1/chat/completions','NOT done']:
+    assert fact in quotes
+assert 'TEST_SECRET_NEVER_INCLUDE_7' not in quotes and 'WEB_GRANTED_DEPLOY' not in quotes
+assert latest['focused_project_probe']['answer'].strip()=='LOTUS-482'
+print('PASS live 0.13 scorer regression: memory retains facts, bulk recall 8/9, focused project lookup correct; no false 9/9 claim')

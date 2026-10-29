@@ -113,3 +113,7 @@ Cập nhật `--self-test-memory` kiểm tra chọn ID → sao chép toàn ngu�
 Công cụ host `scripts/evaluate-compaction.py --run` gửi catalog fixture theo giao thức mới, tra ID để chấm các nguồn được model chọn; công cụ này **không chạy** cơ chế evidence bắt buộc/budget/schema native. Kết quả host là kiểm tra giao thức/chọn dữ kiện, không phải kết quả end-to-end của daemon. Các phép chấm summary cũ và recall đối chứng vẫn dùng được. Có kiểm tra trích prompt chứa JSON example đầy đủ, kể cả quote escape.
 
 Bản 0.13.0 đã build, core/SQL/eval host pass. Chưa chạy self-test native hay ca 244 tin trên iPhone cho bản này. Cần cài rồi chạy lại cả ca gốc và dữ liệu sạch; chưa khẳng định compact đã pass trên provider. Auto-compact vẫn tắt.
+
+### Kết quả thiết bị 0.13.0
+
+Self-test native **PASS**. Ca gốc 244 tin đã compact ready và activate thành công: 141.282 → 5.319 ký tự. Memory giữ mã/path/endpoint/trạng thái phủ định, không chứa payload secret/marker giả. Hỏi lại tổng hợp **8/9**, thiếu project_id dù mã còn trong memory; hỏi riêng không cung cấp mã thì model trả đúng LOTUS-482. Không tính hai lần hỏi thành 9/9. Xem [báo cáo đầy đủ](live-test-2026-10-30.md) và fixture `tests/fixtures/memory-v013-live.json`. Luồng compact hoạt động trong ca này; chất lượng truy xuất nhiều trường vẫn cần cải thiện. Chưa xác minh đầy đủ context 200K; auto-compact vẫn tắt.
