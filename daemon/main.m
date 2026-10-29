@@ -1,6 +1,7 @@
 #import "../shared/AHProtocol.h"
 #import "AHAgentRuntime.h"
 #import "AHWebServer.h"
+#import "AHCompaction.h"
 #import <sqlite3.h>
 #import "../shared/AHDatabase.h"
 #import <sys/socket.h>
@@ -13,7 +14,9 @@
 static sqlite3 *db;
 static AHAgentRuntime *agent;
 static AHWebServer *web;
+static AHCompaction *compaction;
 static id execute(NSString *method, NSDictionary *params, NSString **error) {
+    if([method hasPrefix:@"context."]) return [compaction handle:method params:params error:error];
     if([method hasPrefix:@"web."]) return [web handle:method params:params error:error];
     if([method hasPrefix:@"ai."]) return [agent handle:method params:params error:error];
     if ([method isEqual:@"system.info"]) {
@@ -186,6 +189,7 @@ int main(void) { @autoreleasepool {
     if (sqlite3_open([AHDataPath stringByAppendingPathComponent:@"memory.sqlite"].UTF8String, &db) != SQLITE_OK) return 2;
     if (AHMigrate(db) != SQLITE_OK) return 3;
     if(AHTaskRecover(db)!=SQLITE_OK) return 6;
+    compaction=[[AHCompaction alloc] initWithDatabase:db];
     agent=[[AHAgentRuntime alloc] initWithDatabase:db tool:^NSDictionary *(NSString *name){ NSString *error=nil; return execute(name,@{},&error); }];
     web=[[AHWebServer alloc] initWithDatabase:db rpc:^id(NSString *method,NSDictionary *params,NSString **error){ return execute(method,params,error); }];
     [agent recoverAndStart];

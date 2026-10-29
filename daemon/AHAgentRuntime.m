@@ -4,6 +4,7 @@
 #import "../app/AHProviderConfig.h"
 #import "../app/AHProfiles.h"
 #import "../app/AHContext.h"
+#import "../app/AHPrompt.h"
 #import "../shared/AHTasks.h"
 static NSString *json(id object) { return [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:object options:0 error:nil] encoding:NSUTF8StringEncoding]; }
 static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil]; }
@@ -51,15 +52,16 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         if(![identifier isKindOfClass:NSString.class] || identifier.length<8 || identifier.length>80 || ![conversation isKindOfClass:NSString.class] || ![text isKindOfClass:NSString.class] || !text.length || text.length>8000 || ![config isKindOfClass:NSDictionary.class]) { *error=@"Invalid AI request"; return nil; }
         NSArray *existing=[self rows:@"SELECT id FROM tasks WHERE id=? AND conversation_id=? AND tool='chat.ai'" values:@[identifier,conversation]]; if(existing.count) return @{@"id":identifier};
         if([self rows:@"SELECT id FROM tasks WHERE conversation_id=? AND tool='chat.ai' AND state IN ('queued','running')" values:@[conversation]].count) { *error=@"Conversation already has an active AI task"; return nil; }
+        if([self rows:@"SELECT id FROM compactions WHERE conversation_id=? AND state='running'" values:@[conversation]].count) { *error=@"Đang compact hội thoại; vui lòng chờ hoặc bỏ snapshot."; return nil; }
         NSString *urlError=nil; NSURL *url=[config[@"endpoint"] isKindOfClass:NSString.class]?AHChatURL(config[@"endpoint"],&urlError):nil;
         if(!url || ![config[@"id"] isKindOfClass:NSString.class] || ![config[@"model"] isKindOfClass:NSString.class] || ![config[@"model"] length]) { *error=urlError ?: @"Invalid provider"; return nil; }
-        NSDictionary *snapshot=@{@"id":config[@"id"],@"endpoint":url.absoluteString,@"model":config[@"model"],@"disableStreaming":@([config[@"disableStreaming"] boolValue]),@"max_output_tokens":@([config[@"max_output_tokens"] respondsToSelector:@selector(integerValue)] ? MAX(256,MIN(32768,[config[@"max_output_tokens"] integerValue])):8192)};
+        NSDictionary *snapshot=@{@"id":config[@"id"],@"endpoint":url.absoluteString,@"model":config[@"model"],@"disableStreaming":@([config[@"disableStreaming"] boolValue]),@"context_window_tokens":@([config[@"context_window_tokens"] integerValue]),@"max_output_tokens":@([config[@"max_output_tokens"] respondsToSelector:@selector(integerValue)] ? MAX(256,MIN(32768,[config[@"max_output_tokens"] integerValue])):8192)};
         BOOL ok=[self sql:@"BEGIN IMMEDIATE" values:@[]];
         if(ok) ok=[self sql:@"INSERT INTO tasks(id,conversation_id,tool) VALUES (?,?,'chat.ai')" values:@[identifier,conversation]];
         if(ok) ok=[self sql:@"INSERT INTO messages(role,content,conversation_id) VALUES ('user',?,?)" values:@[text,conversation]];
-        NSArray *history=[[[self rows:@"SELECT role,content FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 100" values:@[conversation]] reverseObjectEnumerator] allObjects];
-        NSString *system=[NSString stringWithFormat:@"Bạn là trợ lý Agent Home. Model ID cấu hình: %@. Dùng Markdown để trình bày. Chỉ có công cụ system_info đọc phiên bản hệ điều hành và dung lượng. Không khẳng định đã thực hiện khi chưa có kết quả công cụ.",snapshot[@"model"]];
-        NSMutableArray *context=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":system}]; [context addObjectsFromArray:AHContextSnapshot(history,history.count)[@"messages"]];
+        NSDictionary *summary=[self rows:@"SELECT id,end_id,summary FROM compactions WHERE conversation_id=? AND state='active' LIMIT 1" values:@[conversation]].firstObject;
+        NSArray *history=[[[self rows:@"SELECT role,content FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 100" values:@[conversation,summary[@"end_id"] ?: @"0"]] reverseObjectEnumerator] allObjects];
+        NSMutableArray *context=AHPromptContext(history,summary[@"summary"],snapshot[@"model"]);
         if(ok) ok=[self sql:@"INSERT INTO ai_runs(task_id,config,context) VALUES (?,?,?)" values:@[identifier,json(snapshot),json(context)]];
         NSString *title=[[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject]; if(title.length>60) title=[title substringToIndex:60];
         if(ok) ok=[self sql:@"UPDATE conversations SET title=CASE WHEN title='Hội thoại mới' THEN ? ELSE title END,accessed_at=(julianday('now')-2440587.5)*86400 WHERE id=?" values:@[title,conversation]];
@@ -113,12 +115,13 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
         AHAgentRuntime *self=weakSelf; if(!self || ![self.activeID isEqual:identifier]) return; [self.reasoning appendString:delta];
         if(NSDate.timeIntervalSinceReferenceDate-self.lastCheckpoint>0.2) [self checkpoint];
     };
-    NSDictionary *tool=@{@"type":@"function",@"function":@{@"name":@"system_info",@"description":@"Read OS and disk space. Read-only risk 0.",@"parameters":@{@"type":@"object",@"properties":@{},@"additionalProperties":@NO}}};
+    NSDictionary *tool=AHSystemInfoTool();
     [self.provider sendTo:[NSURL URLWithString:self.config[@"endpoint"]] model:self.config[@"model"] key:key messages:self.context tools:@[tool] streaming:![self.config[@"disableStreaming"] boolValue] delta:^(NSString *delta){
         if(![self.activeID isEqual:identifier]) return; [self.partial appendString:delta];
         if(NSDate.timeIntervalSinceReferenceDate-self.lastCheckpoint>0.2) [self checkpoint];
     } completion:^(NSDictionary *message,NSError *error){
         if(![self.activeID isEqual:identifier]) return;
+        if(self.provider.usage) [self sql:@"INSERT OR REPLACE INTO token_usage(task_id,usage) VALUES (?,?)" values:@[identifier,json(self.provider.usage)]];
         NSString *finish=[NSString stringWithFormat:@"Provider finish_reason: %@",self.provider.finishCause ?: @"not supplied"];
         AHTaskEvent(self.db,identifier.UTF8String,"running",finish.UTF8String); self.provider=nil;
         if(!self.reasoning.length && [message[@"reasoning_content"] isKindOfClass:NSString.class]) [self.reasoning appendString:[message[@"reasoning_content"] substringToIndex:MIN([message[@"reasoning_content"] length],(NSUInteger)64000)]];

@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 @interface AHProvider : NSObject
 @property NSUInteger maxOutputTokens;
+@property (nonatomic,copy,readonly) NSDictionary *usage;
 @property (nonatomic,copy) void (^reasoningDelta)(NSString *text);
 @property (nonatomic,copy,readonly) NSString *finishCause;
 // Callbacks run on the main thread; one instance represents one request.

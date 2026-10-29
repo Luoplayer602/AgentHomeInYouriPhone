@@ -6,7 +6,7 @@ class Element {
  set innerHTML(value){throw Error('Unsafe HTML insertion')}
 }
 const ids={},document={createElement:tag=>new Element(tag),createTextNode:text=>({tag:'#text',text}),getElementById:id=>ids[id]||(ids[id]=new Element(id)),body:new Element('body')};
-let copied='';const context={document,console,window:{isSecureContext:true},navigator:{clipboard:{writeText:async text=>copied=text}},fetch:async()=>({ok:false,status:401,json:async()=>({error:'login required'})}),setInterval(){},setTimeout(){},EventSource:class{},crypto:require('crypto').webcrypto};
+let copied='';const context={document,console,window:{isSecureContext:true},navigator:{clipboard:{writeText:async text=>copied=text}},fetch:async()=>({ok:false,status:401,json:async()=>({error:'login required'})}),setInterval(){},clearInterval(){},setTimeout(){},EventSource:class{},crypto:require('crypto').webcrypto};
 vm.createContext(context);const html=fs.readFileSync('layout/usr/share/agenthome/index.html','utf8'),script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 vm.runInContext(script,context);
 const holder=new Element('div');context.holder=holder;

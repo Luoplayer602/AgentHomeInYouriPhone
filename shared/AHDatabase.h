@@ -36,7 +36,8 @@ static inline int AHMigrate(sqlite3 *db) {
         sqlite3_finalize(r);
         if(rc==SQLITE_OK && !hasReasoning) rc=sqlite3_exec(db,"ALTER TABLE ai_runs ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''",0,0,0);
     }
-    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id); PRAGMA user_version=5; COMMIT", 0, 0, 0);
+    if(rc==SQLITE_OK) rc=sqlite3_exec(db,"CREATE TABLE IF NOT EXISTS compactions(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,state TEXT NOT NULL,end_id INTEGER NOT NULL,source_hash TEXT NOT NULL,base_id TEXT NOT NULL,summary TEXT NOT NULL,provider TEXT NOT NULL,model TEXT NOT NULL,before_chars INTEGER NOT NULL,after_chars INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,schema_version INTEGER NOT NULL DEFAULT 1); CREATE UNIQUE INDEX IF NOT EXISTS one_active_summary ON compactions(conversation_id) WHERE state='active'; CREATE TABLE IF NOT EXISTS token_usage(task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,usage TEXT NOT NULL);",0,0,0);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id); PRAGMA user_version=6; COMMIT", 0, 0, 0);
     if (rc != SQLITE_OK) sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
     sqlite3_exec(db, "PRAGMA foreign_keys=ON", 0, 0, 0);
     return rc;

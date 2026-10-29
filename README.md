@@ -1,6 +1,22 @@
-# Agent Home — nền tảng v0.8.0
+# Agent Home — nền tảng v0.9.0
 
 App iOS và daemon độc lập dành cho iPhone jailbreak rootless. Đích hiện tại: iPhone 6s, iOS 15, Dopamine; build bằng Theos trong WSL2.
+
+## Bản 0.9.0 — compact context thủ công
+
+Nhấn **◉ Context** trong app hoặc web:
+
+1. **Compact thủ công** tạo request tóm tắt qua provider đang chọn. Giữ ít nhất 4 tin gần nhất và chỉ lấy phần cũ kết thúc ở tin assistant; không compact khi hội thoại có task queued/running. Source mỗi lần tối đa 200 tin/96.000 ký tự, có thể compact nhiều lần sau khi áp dụng.
+2. Xem bản **ready** rồi chọn **Dùng summary**. Snapshot lưu source end ID/hash SHA-256, base snapshot, provider/model, thời gian, schema version và số ký tự trước/sau. Kiểm tra nguồn/base trước khi activate; việc đổi snapshot active dùng transaction.
+3. **Bỏ snapshot chờ / hủy compact** giữ summary cũ. **Bỏ toàn bộ summary** trở về dùng các tin gần nhất. Transcript gốc luôn giữ nguyên.
+
+Lỗi/hủy/restart không tự kích hoạt bản tóm tắt dở; daemon khôi phục running thành failed. Summary được đưa vào **user data** có nhãn nguồn, không trở thành system instruction hoặc quyền tool. Runtime dùng system prompt + summary active + recent messages trong ngân sách 16.000 ký tự, dành bớt ngân sách cho summary. Không thay đổi context của request đang chạy. Chỉ compact tự động khi người dùng yêu cầu rõ trong phiên bản sau.
+
+**Chỉ báo context:** `◉ Cxx%` là ngân sách ký tự app. Trong provider có trường **Context window tokens (0 = chưa biết)**; nếu khai báo, icon `◉ ~xx%` dùng input ước lượng (UTF-8 bytes / 4, gồm system + schema + summary + tin) cộng output dự phòng. Đây chưa phải tokenizer chính xác, chưa tính tin đang gõ/future tool outputs; không tự đoán window theo tên model. Chi tiết hiển thị các tin ngoài lượt gửi và usage thực của API chat gần nhất nếu provider có trả. Usage của stream chỉ có khi endpoint thực sự phát usage; có thể thử tắt streaming để kiểm tra. Không dùng số token ước lượng như số đo thực.
+
+**Kiểm thử thiết bị:** chat ít nhất 6 tin, ghi lại một mục tiêu/ràng buộc, compact, xem preview và áp dụng; hỏi lại mục tiêu ở lượt mới. Kiểm tra bỏ snapshot chờ vẫn giữ active cũ, bỏ active thì lịch sử vẫn đủ; đóng/mở app; restart daemon khi compact đang chạy. Thử một lần compact lỗi để xác nhận active cũ không thay đổi. Compact dùng API có chi phí; không tự thử lại sau restart.
+
+Tests host: `python3 tests/compaction_test.py` chạy SQL thực cho activate/drop/cancel, isolation, rollback, giữ lịch sử và recent boundary. Runtime/database/web tests vẫn áp dụng. Chất lượng summary và việc provider nhớ đúng nội dung phải kiểm tra trên model thật; không có test host nào chứng minh semantic fidelity.
 
 ## Bản 0.8.0 — Webview và reasoning từ provider
 
@@ -139,14 +155,14 @@ Cần SDK iPhoneOS15.6 và toolchain arm64 trong Theos. Nếu Theos ở vị tr�
 Thay `PHONE_IP` bằng IP máy. Thiết bị cần đang jailbreak, đã cài OpenSSH. Chép gói mới nhất bằng tên thực tế ở `packages/`:
 
 ```bash
-scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.8.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
+scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.9.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
 ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP
 ```
 
 Trong shell iPhone, dùng quyền quản trị để cài gói (ví dụ `sudo`, nếu đã cấu hình):
 
 ```bash
-sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.8.0_iphoneos-arm64.deb
+sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.9.0_iphoneos-arm64.deb
 sudo launchctl bootstrap system /var/jb/Library/LaunchDaemons/dev.agenthome.daemon.plist
 sudo launchctl kickstart -k system/dev.agenthome.daemon
 sudo uicache -p /var/jb/Applications/AgentHome.app

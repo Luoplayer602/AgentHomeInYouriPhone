@@ -26,15 +26,15 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
     NSDictionary *profile=nil; for(NSDictionary *p in AHProfiles()) if([p[@"id"] isEqual:self.identifier]) profile=p;
     self.type=profile[@"type"] ?: self.type ?: @"compatible"; self.identifier=self.identifier ?: NSUUID.UUID.UUIDString;
     BOOL gemini=[self.type isEqual:@"gemini"];
-    self.labels=gemini?@[@"Provider name",@"Model ID",@"Max output tokens",@"API key"]:@[@"Provider name",@"Base URL",@"Model ID",@"Max output tokens",@"API key"];
-    NSString *limit=[profile[@"max_output_tokens"] description] ?: @"8192";
-    NSArray *values=gemini?@[profile[@"name"]?:@"",profile[@"model"]?:@"",limit,@""]:@[profile[@"name"]?:@"",profile[@"endpoint"]?:@"",profile[@"model"]?:@"",limit,@""];
+    self.labels=gemini?@[@"Provider name",@"Model ID",@"Context window tokens (0 = chưa biết)",@"Max output tokens",@"API key"]:@[@"Provider name",@"Base URL",@"Model ID",@"Context window tokens (0 = chưa biết)",@"Max output tokens",@"API key"];
+    NSString *limit=[profile[@"max_output_tokens"] description] ?: @"8192", *window=[profile[@"context_window_tokens"] description] ?: @"0";
+    NSArray *values=gemini?@[profile[@"name"]?:@"",profile[@"model"]?:@"",window,limit,@""]:@[profile[@"name"]?:@"",profile[@"endpoint"]?:@"",profile[@"model"]?:@"",window,limit,@""];
     NSMutableArray *fields=[NSMutableArray array];
     for(NSUInteger i=0;i<self.labels.count;i++) {
         AHInput *field=[AHInput new]; field.text=values[i]; field.font=[UIFont systemFontOfSize:15];
         field.placeholder=self.labels[i];
         if(i==self.labels.count-1) { field.secureTextEntry=YES; field.placeholder=profile?@"Để trống để giữ key":@"Nhập API key"; }
-        if(i==self.labels.count-2) field.keyboardType=UIKeyboardTypeNumberPad;
+        if(i==self.labels.count-2 || i==self.labels.count-3) field.keyboardType=UIKeyboardTypeNumberPad;
         if(!gemini && i==1) { field.keyboardType=UIKeyboardTypeURL; field.placeholder=@"https://host/v1"; }
         [fields addObject:field];
     }
@@ -56,13 +56,14 @@ static void AHSettingsError(UIViewController *owner,NSString *text) {
     NSMutableArray *values=[NSMutableArray array]; for(UITextField *field in self.fields) [values addObject:[field.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @""];
     BOOL gemini=[self.type isEqual:@"gemini"];
     NSString *name=values[0], *model=values[gemini?1:2], *key=values.lastObject;
-    NSString *limit=values[gemini?2:3];
+    NSString *limit=values[values.count-2], *window=values[values.count-3];
+    if(!window.length || [window rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location!=NSNotFound || window.integerValue<0 || window.integerValue>2000000) { AHSettingsError(self,@"Context window phải từ 0 tới 2.000.000 token; 0 = chưa biết."); return; }
     if(!limit.length || [limit rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location!=NSNotFound || limit.integerValue<256 || limit.integerValue>32768) { AHSettingsError(self,@"Max output tokens phải từ 256 tới 32768 (tùy giới hạn model)."); return; }
     NSString *error=nil; NSURL *url=AHChatURL(gemini?@"https://generativelanguage.googleapis.com/v1beta/openai/":values[1],&error);
     if(!name.length || !model.length || !url) { AHSettingsError(self,error ?: @"Cần tên provider và model ID."); return; }
     NSDictionary *old=nil; for(NSDictionary *p in AHProfiles()) if([p[@"id"] isEqual:self.identifier]) old=p;
     if(!key.length && !AHReadKey(self.identifier).length) { AHSettingsError(self,@"Cần API key cho provider mới."); return; }
-    NSDictionary *profile=@{@"id":self.identifier,@"type":self.type,@"name":name,@"endpoint":url.absoluteString,@"model":model,@"disableStreaming":old[@"disableStreaming"] ?: @NO,@"max_output_tokens":@(limit.integerValue)};
+    NSDictionary *profile=@{@"id":self.identifier,@"type":self.type,@"name":name,@"endpoint":url.absoluteString,@"model":model,@"disableStreaming":old[@"disableStreaming"] ?: @NO,@"max_output_tokens":@(limit.integerValue),@"context_window_tokens":@(window.integerValue)};
     if(!AHSaveProfile(profile,key,&error)) { AHSettingsError(self,error); return; }
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ [AHClient call:@"web.profile" params:@{@"profile":AHActiveProfile()} error:nil]; });
     [self.navigationController popToRootViewControllerAnimated:YES];

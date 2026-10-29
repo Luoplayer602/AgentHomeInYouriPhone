@@ -1,10 +1,10 @@
 # Context window và compact — yêu cầu phải giữ cho các bản tiếp theo
 
-Người dùng yêu cầu chỉ báo context và khả năng compact. Bản 0.6.0 chỉ hiển thị ngân sách ký tự hiện hành; không có compact tự động và không khẳng định 16.000 ký tự là cửa sổ context của model.
+Từ 0.9.0 đã có compact thủ công với preview/activate/discard trên app và web. Auto-compact chưa triển khai. 16.000 ký tự vẫn là ngân sách app, không phải window thực của model.
 
 ## Hiện trạng
 
-AHContextSnapshot là nguồn chung cho UI và request: chọn các tin gần nhất trong ngân sách 16.000 ký tự UTF-16. Daemon trả tổng số tin của hội thoại để hiển thị cả phần nằm ngoài số tin tải lên. System prompt, tool schemas, tool outputs và output reservation chưa được tính. Provider/model có thể có cửa sổ khác nhau; hiện chưa lưu cấu hình giới hạn token và chưa có tokenizer. Số % không phải token usage chính xác.
+AHContextSnapshot là nguồn chung cho UI và request: chọn các tin gần nhất trong ngân sách 16.000 ký tự UTF-16. Daemon trả tổng số tin của hội thoại để hiển thị cả phần nằm ngoài số tin tải lên. AHPromptContext dùng chung giữa dựng request và ước lượng. Có window do người dùng khai báo, output reservation và ước lượng UTF-8 bytes/4 gồm system/tool schema. Chưa có tokenizer đúng model. Usage thực được lưu khi provider trả về (API chat cuối). Tool outputs được thêm trong runtime nhưng ước lượng lượt tiếp chưa tính các output tương lai.
 
 ## Triển khai compact sau runtime
 
@@ -23,3 +23,9 @@ AHContextSnapshot là nguồn chung cho UI và request: chọn các tin gần nh
 - Hủy/lỗi/restart không kích hoạt summary dở.
 - Prompt injection trong nguồn không trở thành quyền dùng tool.
 - Chỉ báo bao gồm input thực tế và phân biệt usage đo được với ước lượng.
+
+## Trạng thái triển khai 0.9.0
+
+Schema compactions giữ state running/ready/active/superseded/failed/discarded, end_id/source_hash/base_id, summary, provider/model, before/after chars, schema_version. Hash nguồn được đọc theo từng hàng để hạn chế RAM. Candidate tối đa 6.000 ký tự và phải giảm chi phí nội dung trước khi ready. Dữ liệu source luôn gửi với vai trò user, system prompt yêu cầu giữ quyết định/ràng buộc/việc đang làm và bỏ secrets. API key hiện tại được redaction trực tiếp; các bí mật khác cần người dùng kiểm tra trong preview.
+
+Cần làm tiếp: tokenizer theo provider/model, usage tổng hợp qua mọi tool round, cửa sổ compact điều chỉnh theo model thay vì cap ký tự, auto-compact tùy chọn, semantic regression/evals trên provider thật. Chưa bật tự động hoặc coi model-generated summary là chính sách cấp quyền.

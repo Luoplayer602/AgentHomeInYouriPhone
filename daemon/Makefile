@@ -1,6 +1,6 @@
 include $(THEOS)/makefiles/common.mk
 TOOL_NAME = agenthomed
-agenthomed_FILES = main.m AHAgentRuntime.m AHActivityLease.m AHWebServer.mm ../app/AHProvider.mm ../app/AHProfiles.m ../app/AHProviderConfig.m ../app/AHContext.m
+agenthomed_FILES = main.m AHAgentRuntime.m AHActivityLease.m AHCompaction.m AHWebServer.mm ../app/AHProvider.mm ../app/AHProfiles.m ../app/AHProviderConfig.m ../app/AHContext.m ../app/AHPrompt.m
 agenthomed_CCFLAGS = -std=c++17
 agenthomed_CODESIGN_FLAGS = -Sentitlements.plist
 agenthomed_CFLAGS = -fobjc-arc -Wall -Wextra

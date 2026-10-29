@@ -66,7 +66,7 @@ static void replyJSON(int fd,int status,id object,NSString *extra) { respond(fd,
 }
 - (void)profileFrom:(NSDictionary *)profile {
     if(![profile isKindOfClass:NSDictionary.class] || ![profile[@"id"] isKindOfClass:NSString.class] || ![profile[@"endpoint"] isKindOfClass:NSString.class] || ![profile[@"model"] isKindOfClass:NSString.class]) return;
-    self.profile=@{@"id":profile[@"id"],@"endpoint":profile[@"endpoint"],@"model":profile[@"model"],@"disableStreaming":@([profile[@"disableStreaming"] boolValue]),@"max_output_tokens":@([profile[@"max_output_tokens"] integerValue] ?: 8192)};
+    self.profile=@{@"id":profile[@"id"],@"endpoint":profile[@"endpoint"],@"model":profile[@"model"],@"disableStreaming":@([profile[@"disableStreaming"] boolValue]),@"context_window_tokens":@([profile[@"context_window_tokens"] integerValue]),@"max_output_tokens":@([profile[@"max_output_tokens"] integerValue] ?: 8192)};
 }
 - (id)handle:(NSString *)method params:(NSDictionary *)params error:(NSString **)error {
     if([method isEqual:@"web.status"]) return [self status];
@@ -152,6 +152,11 @@ static void replyJSON(int fd,int status,id object,NSString *extra) { respond(fd,
             NSDictionary *params=@{@"conversation_id":identifier}; id history=self.rpc(@"chat.list",params,&error); id snapshot=self.rpc(@"ai.snapshot",params,&error);
             if(history && snapshot) result=@{@"history":history,@"snapshot":snapshot}; stream=[path isEqual:@"/api/events"];
         } else if(request.method=="POST" && [path isEqual:@"/api/create"]) result=self.rpc(@"chat.create",@{},&error);
+        else if(request.method=="GET" && [path isEqual:@"/api/context"]) result=self.rpc(@"context.status",@{@"conversation_id":query[@"conversation_id"] ?: @"",@"profile":self.profile ?: @{}},&error);
+        else if(request.method=="POST" && [@[@"/api/compact",@"/api/activate",@"/api/discard",@"/api/drop"] containsObject:path]) {
+            NSString *method=[path isEqual:@"/api/compact"]?@"context.compact":[path isEqual:@"/api/activate"]?@"context.activate":[path isEqual:@"/api/discard"]?@"context.discard":@"context.drop";
+            result=self.rpc(method,@{@"conversation_id":[body[@"conversation_id"] isKindOfClass:NSString.class]?body[@"conversation_id"]:@"",@"id":[body[@"id"] isKindOfClass:NSString.class]?body[@"id"]:@"",@"profile":self.profile ?: @{}},&error);
+        }
         else if(request.method=="POST" && [path isEqual:@"/api/submit"]) {
             if(!self.profile.count || ![body[@"conversation_id"] isKindOfClass:NSString.class] || ![body[@"text"] isKindOfClass:NSString.class] || ![body[@"id"] isKindOfClass:NSString.class]) { code=400; result=@{@"error":@"Thiếu cấu hình provider hoặc nội dung"}; return; }
             result=self.rpc(@"ai.submit",@{@"conversation_id":body[@"conversation_id"],@"id":body[@"id"],@"text":body[@"text"],@"profile":self.profile},&error);

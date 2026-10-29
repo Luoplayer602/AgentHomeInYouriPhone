@@ -21,6 +21,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
 @property BOOL finished;
 @property BOOL doneMarker;
 @property BOOL finishReason;
+@property (nonatomic,copy) NSDictionary *usage;
 @property (nonatomic,copy) NSString *finishCause;
 @end
 @implementation AHProvider
@@ -32,7 +33,9 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
     [request setValue:streaming ? @"text/event-stream" : @"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
     NSError *error = nil;
-    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"model":model, @"messages":messages, @"tools":tools, @"stream":@(streaming), @"max_tokens":@(self.maxOutputTokens ?: 8192)} options:0 error:&error];
+    NSMutableDictionary *payload=[@{@"model":model,@"messages":messages,@"stream":@(streaming),@"max_tokens":@(self.maxOutputTokens ?: 8192)} mutableCopy];
+    if(tools.count) payload[@"tools"]=tools;
+    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&error];
     if (error) { completion(nil, error); return; }
     NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
     config.timeoutIntervalForResource = 600;
@@ -69,7 +72,9 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
     id body = [NSJSONSerialization JSONObjectWithData:[event dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
     if (![body isKindOfClass:NSDictionary.class]) { [self fail:@"SSE chứa JSON không hợp lệ."]; return; }
     if (body[@"error"]) { [self fail:[self providerDetail:body]]; return; }
+    if([body[@"usage"] isKindOfClass:NSDictionary.class]) self.usage=body[@"usage"];
     id choices = body[@"choices"];
+    if(!choices && self.usage) return;
     if (![choices isKindOfClass:NSArray.class]) { [self fail:@"SSE thiếu choices."]; return; }
     if (![choices count]) return; // usage-only event
     id choice = choices[0];
@@ -140,6 +145,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
         }
     } else if (!failure) {
         id body = [NSJSONSerialization JSONObjectWithData:self.body options:0 error:nil];
+        if([body isKindOfClass:NSDictionary.class] && [body[@"usage"] isKindOfClass:NSDictionary.class]) self.usage=body[@"usage"];
         if (self.status < 200 || self.status >= 300) {
             NSString *hint = self.status == 404 ? @"Kiểm tra đường dẫn API và model ID." : @"Kiểm tra cấu hình provider; có thể tắt Streaming trong API để thử.";
             failure = AHError([NSString stringWithFormat:@"HTTP %ld\n%@%@\n%@\n%@", (long)self.status, self.url.host, self.url.path, hint, [self providerDetail:body]]);

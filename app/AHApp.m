@@ -9,6 +9,7 @@
 #import "AHChatContent.h"
 #import "AHDisplay.h"
 #import "AHContext.h"
+#import "AHContextView.h"
 #import "AHTaskList.h"
 @interface AHChatCell : UITableViewCell
 @property (nonatomic, strong) UIView *bubble;
@@ -72,6 +73,7 @@
 @property BOOL busy;
 @property (nonatomic,strong) UIButton *contextButton;
 @property NSUInteger historyCount;
+@property (nonatomic,strong) NSDictionary *contextMetrics;
 @property (nonatomic,strong) NSTimer *pollTimer;
 @property BOOL polling;
 @property NSTimeInterval lastPoll;
@@ -143,17 +145,21 @@
     return cell;
 }
 - (void)render {
-    NSDictionary *context=AHContextSnapshot(self.messages,self.historyCount);
-    double percent=[context[@"characters"] doubleValue]*100/AHContextBudget;
-    [self.contextButton setTitle:[NSString stringWithFormat:@"◉ %.0f%%",percent] forState:UIControlStateNormal];
+    NSDictionary *context=self.contextMetrics ?: AHContextSnapshot(self.messages,self.historyCount);
+    double window=[context[@"window_tokens"] doubleValue];
+    BOOL estimated=window>0 && context[@"estimated_input_tokens"]!=nil;
+    double percent=estimated?([context[@"estimated_input_tokens"] doubleValue]+[context[@"output_tokens"] doubleValue])*100/window:[context[@"characters"] doubleValue]*100/AHContextBudget;
+    [self.contextButton setTitle:[NSString stringWithFormat:estimated?@"◉ ~%.0f%%":@"◉ C%.0f%%",percent] forState:UIControlStateNormal];
+    self.contextButton.accessibilityLabel=estimated?@"Ước lượng token input và output dự phòng so với window khai báo":@"Ngân sách ký tự app; window model chưa khai báo";
     self.contextButton.tintColor=percent>=90?UIColor.systemOrangeColor:UIColor.systemBlueColor;
     [self.chat reloadData];
     NSInteger rows = self.messages.count + (self.draft.length ? 1 : 0);
     if (rows) [self.chat scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:rows-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
 }
 - (void)contextInfo {
-    NSDictionary *context=AHContextSnapshot(self.messages,self.historyCount);
-    [self show:[NSString stringWithFormat:@"Context gửi lần tới: %@ / %@ ký tự tin nhắn\n%lu tin được đưa vào · %@ tin cũ ngoài lượt gửi\n\nĐây là ngân sách đầu vào của app, KHÔNG phải số token hay giới hạn context thật của model. Chưa tính system prompt và tool schema. Lịch sử đầy đủ vẫn ở SQLite.\n\nCompact bằng bản tóm tắt có checkpoint sẽ được triển khai tiếp; hiện app chưa tự tóm tắt.",context[@"characters"],context[@"budget"],(unsigned long)[context[@"messages"] count],context[@"omitted"]]];
+    if(self.presentedViewController) return;
+    AHContextView *view=[AHContextView new]; view.conversationID=self.conversationID;
+    [self presentViewController:[[UINavigationController alloc] initWithRootViewController:view] animated:YES completion:nil];
 }
 - (void)tasks {
     if(self.presentedViewController) return;
@@ -223,11 +229,13 @@
     if(!self.running && now-self.lastPoll<2) return; self.lastPoll=now; self.polling=YES; NSUInteger generation=self.runID;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         NSError *error=nil; NSDictionary *snapshot=[AHClient call:@"ai.snapshot" params:@{@"conversation_id":self.conversationID} error:&error];
+        NSDictionary *metrics=snapshot?[AHClient call:@"context.status" params:@{@"conversation_id":self.conversationID,@"profile":AHActiveProfile()} error:nil]:nil;
         NSDictionary *history=snapshot?[AHClient call:@"chat.list" params:@{@"conversation_id":self.conversationID} error:&error]:nil;
         dispatch_async(dispatch_get_main_queue(),^{
             self.polling=NO; if(self.runID!=generation) return;
             if(!snapshot || !history) { self.statusLabel.text=error.localizedDescription ?: @"Mất kết nối daemon"; return; }
             BOOL changed=![self.messages isEqual:history[@"messages"]];
+            if(metrics && ![metrics isEqual:self.contextMetrics]) { self.contextMetrics=metrics; changed=YES; }
             self.messages=[history[@"messages"] mutableCopy]; self.historyCount=[history[@"total_messages"] unsignedIntegerValue];
             NSString *state=snapshot[@"state"]; BOOL active=[@[@"queued",@"running"] containsObject:state ?: @""];
             NSString *partial=active?snapshot[@"partial"]:@""; if(![self.draft isEqual:partial]) changed=YES;
