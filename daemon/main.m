@@ -158,7 +158,10 @@ static void serve(int fd) {
     BOOL valid = [request isKindOfClass:NSDictionary.class] && [request[@"id"] isKindOfClass:NSString.class] && [request[@"method"] isKindOfClass:NSString.class] && [request[@"params"] isKindOfClass:NSDictionary.class];
     if (valid) {
         __block id responseResult=nil; __block NSString *responseError=nil;
-        dispatch_sync(dispatch_get_main_queue(),^{ responseResult=execute(request[@"method"],request[@"params"],&responseError); });
+        dispatch_sync(dispatch_get_main_queue(),^{
+            @try { responseResult=execute(request[@"method"],request[@"params"],&responseError); }
+            @catch(NSException *exception) { NSLog(@"AgentHome IPC %@ failed: %@",request[@"method"],exception.name); responseError=@"Daemon gặp lỗi xử lý yêu cầu; dữ liệu vẫn được giữ. Hãy báo tên thao tác đang dùng."; }
+        });
         result=responseResult; error=responseError;
     }
     else error = @"Invalid request";
@@ -191,7 +194,10 @@ int main(void) { @autoreleasepool {
     if(AHTaskRecover(db)!=SQLITE_OK) return 6;
     compaction=[[AHCompaction alloc] initWithDatabase:db];
     agent=[[AHAgentRuntime alloc] initWithDatabase:db tool:^NSDictionary *(NSString *name){ NSString *error=nil; return execute(name,@{},&error); }];
-    web=[[AHWebServer alloc] initWithDatabase:db rpc:^id(NSString *method,NSDictionary *params,NSString **error){ return execute(method,params,error); }];
+    web=[[AHWebServer alloc] initWithDatabase:db rpc:^id(NSString *method,NSDictionary *params,NSString **error){
+        @try { return execute(method,params,error); }
+        @catch(NSException *exception) { NSLog(@"AgentHome web RPC %@ failed: %@",method,exception.name); if(error) *error=@"Daemon gặp lỗi xử lý request; hãy báo tên thao tác."; return nil; }
+    }];
     [agent recoverAndStart];
     runQueuedTasks();
     int listener = socket(AF_UNIX, SOCK_STREAM, 0);

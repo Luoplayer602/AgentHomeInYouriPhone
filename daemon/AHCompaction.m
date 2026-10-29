@@ -53,7 +53,8 @@ static NSString *encode(id value) { return [[NSString alloc] initWithData:[NSJSO
         NSData *estimate=[NSJSONSerialization dataWithJSONObject:@{@"messages":context,@"tools":@[AHSystemInfoTool()]} options:0 error:nil];
         NSUInteger estimateTokens=(estimate.length+3)/4;
         NSDictionary *count=[self rows:@"SELECT count(*) AS n FROM messages WHERE conversation_id=? AND id>?" values:@[conversation,active[@"end_id"] ?: @"0"]].firstObject;
-        NSUInteger omitted=[count[@"n"] unsignedIntegerValue]-MIN([count[@"n"] unsignedIntegerValue],[recent[@"messages"] count]);
+        NSUInteger total=(NSUInteger)MAX(0,[count[@"n"] longLongValue]);
+        NSUInteger omitted=total-MIN(total,[recent[@"messages"] count]);
         return @{@"estimated_input_tokens":@(estimateTokens),@"estimate_method":@"UTF-8 bytes / 4, includes system and tool schema; not a tokenizer",@"active":active ?: @{},@"latest":latest ?: @{},@"characters":@([recent[@"characters"] unsignedIntegerValue]+prefix.length),@"budget":@(AHContextBudget),@"recent_count":@([recent[@"messages"] count]),@"omitted_recent":@(omitted),@"window_tokens":profile[@"context_window_tokens"] ?: @0,@"output_tokens":profile[@"max_output_tokens"] ?: @8192,@"usage":usage ?: @{}};
     }
     BOOL busy=[self rows:@"SELECT id FROM tasks WHERE conversation_id=? AND state IN ('queued','running')" values:@[conversation]].count>0;

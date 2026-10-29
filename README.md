@@ -1,6 +1,18 @@
-# Agent Home — nền tảng v0.9.0
+# Agent Home — nền tảng v0.9.1
 
 App iOS và daemon độc lập dành cho iPhone jailbreak rootless. Đích hiện tại: iPhone 6s, iOS 15, Dopamine; build bằng Theos trong WSL2.
+
+## Bản 0.9.1 — sửa daemon crash khi đọc Context
+
+SQLite row decoder trả giá trị dạng NSString; phần đếm omitted_recent đã gọi unsignedIntegerValue (không có trên NSString), gây exception và launchd restart lặp khi app poll Context. Đổi sang longLongValue có kiểm tra không âm. Thêm exception boundary tại IPC, chỉ log tên method/exception, không log params hoặc key.
+
+SQL tests trên Linux không kiểm tra được dispatch selector của Foundation. Sau khi cài/restart daemon, chạy regression trực tiếp trên iPhone bằng Perl (có sẵn trên thiết bị thử nghiệm):
+
+```bash
+ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP 'perl -' < tests/ipc_smoke.pl
+```
+
+Script chỉ đọc system.info, danh sách hội thoại và context.status của từng hội thoại; không in nội dung chat/API key.
 
 ## Bản 0.9.0 — compact context thủ công
 
@@ -155,14 +167,14 @@ Cần SDK iPhoneOS15.6 và toolchain arm64 trong Theos. Nếu Theos ở vị tr�
 Thay `PHONE_IP` bằng IP máy. Thiết bị cần đang jailbreak, đã cài OpenSSH. Chép gói mới nhất bằng tên thực tế ở `packages/`:
 
 ```bash
-scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.9.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
+scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.9.1_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
 ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP
 ```
 
 Trong shell iPhone, dùng quyền quản trị để cài gói (ví dụ `sudo`, nếu đã cấu hình):
 
 ```bash
-sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.9.0_iphoneos-arm64.deb
+sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.9.1_iphoneos-arm64.deb
 sudo launchctl bootstrap system /var/jb/Library/LaunchDaemons/dev.agenthome.daemon.plist
 sudo launchctl kickstart -k system/dev.agenthome.daemon
 sudo uicache -p /var/jb/Applications/AgentHome.app
