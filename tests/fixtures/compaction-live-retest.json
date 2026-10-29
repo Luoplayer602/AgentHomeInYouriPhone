@@ -1,0 +1,43 @@
+{
+  "version": "0.11.1",
+  "model": "deepseek-r1-550b",
+  "synthetic_messages": 244,
+  "before_chars": "141282",
+  "after_chars": "1602",
+  "summary": "### Bản tóm tắt chuyển giao nhiệm vụ\n\n#### Mục tiêu\n- Hoàn thành các bước chẩn đoán và kiểm tra dữ liệu người dùng.\n- Đảm bảo dữ liệu người dùng được bảo vệ và các kiểm tra đang chờ được duy trì.\n- Xử lý các yêu cầu sửa đổi và kiểm tra các điểm chưa chắc chắn.\n\n#### Quyết định\n- Tiếp tục các bước chẩn đoán và kiểm tra dữ liệu người dùng.\n- Đảm bảo dữ liệu người dùng được bảo vệ và các kiểm tra đang chờ được duy trì.\n- Xử lý các yêu cầu sửa đổi và kiểm tra các điểm chưa chắc chắn.\n\n#### Ràng buộc và sở thích\n- Dữ liệu người dùng phải được bảo vệ và các kiểm tra đang chờ phải được duy trì.\n- Các yêu cầu sửa đổi phải được xử lý và các điểm chưa chắc chắn phải được kiểm tra.\n\n#### File/artifact và dữ kiện chính\n- Dữ liệu người dùng và các kiểm tra đang chờ.\n- Yêu cầu sửa đổi và các điểm chưa chắc chắn.\n\n#### Đang làm và việc chưa xong\n- Hoàn thành các bước chẩn đoán và kiểm tra dữ liệu người dùng.\n- Xử lý các yêu cầu sửa đổi và kiểm tra các điểm chưa chắc chắn.\n\n#### Bước tiếp theo\n- Tiếp tục các bước chẩn đoán và kiểm tra dữ liệu người dùng.\n- Xử lý các yêu cầu sửa đổi và kiểm tra các điểm chưa chắc chắn.\n\n#### Quyền đã xác nhận\n- Quyền đã được xác nhận cho việc đọc thông tin thiết bị.\n- Quyền không được xác nhận cho việc thực hiện shell và triển khai.\n\n#### Dữ kiện quan trọng\n- Mã dự án: LOTUS-482\n- Ticket: T-42\n- Đường dẫn: /v1/chat/completions\n- Lỗi: HTTP 404\n- Yêu cầu sửa đổi: Kích thước font cuối cùng là 14, không phải 16.\n- Bước tiếp theo: Kiểm tra cấu hình endpoint.\n\n#### Điểm chưa chắc chắn\n- Các yêu cầu sửa đổi và các điểm chưa chắc chắn cần được xử lý và kiểm tra thêm.",
+  "expected_recall": {
+    "project_id": "LOTUS-482",
+    "report_path": "/tmp/agenthome-eval/report.txt",
+    "final_font": 14,
+    "ticket": "T-42",
+    "http_error": "HTTP 404",
+    "endpoint": "/v1/chat/completions",
+    "build_verified": false,
+    "shell_allowed": false,
+    "deploy_allowed": false
+  },
+  "actual_recall": {
+    "project_id": "LOTUS-482",
+    "report_path": null,
+    "final_font": 14,
+    "ticket": "T-42",
+    "http_error": "HTTP 404",
+    "endpoint": "/v1/chat/completions",
+    "build_verified": true,
+    "shell_allowed": false,
+    "deploy_allowed": false,
+    "sum_37_58": 95
+  },
+  "control_recall": {
+    "project_id": "LOTUS-482",
+    "report_path": "/tmp/agenthome-eval/report.txt",
+    "final_font": 14,
+    "ticket": "T-42",
+    "http_error": 404,
+    "endpoint": "/v1/chat/completions",
+    "build_verified": false,
+    "shell_allowed": false,
+    "deploy_allowed": false,
+    "sum_37_58": null
+  }
+}

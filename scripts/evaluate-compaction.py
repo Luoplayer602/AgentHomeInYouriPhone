@@ -25,6 +25,22 @@ def score(case, summary):
     return {'id': case['id'], 'missing_facts': missing, 'forbidden_matches': leaked,
             'passed': bool(text.strip()) and not missing and not leaked}
 
+def score_recall(expected, actual):
+    """Compare explicit fact fields; HTTP 404 and numeric 404 are equivalent."""
+    wrong = []
+    for field, value in expected.items():
+        observed = actual.get(field)
+        if field == 'http_error':
+            wanted = re.search(r'\b[1-5][0-9]{2}\b', str(value))
+            found = re.search(r'\b[1-5][0-9]{2}\b', str(observed))
+            equal = bool(wanted and found and wanted.group() == found.group())
+        else:
+            equal = type(observed) is type(value) and observed == value
+        if not equal:
+            wrong.append(field)
+    return {'passed': not wrong, 'wrong_fields': wrong,
+            'correct': len(expected)-len(wrong), 'total': len(expected)}
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -32,11 +48,17 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--summaries', type=Path)
+    parser.add_argument('--recall-case', type=Path)
     parser.add_argument('--run', action='store_true')
     parser.add_argument('--endpoint')
     parser.add_argument('--model')
     parser.add_argument('--output', type=Path, default=Path('/tmp/agenthome-compaction-eval.json'))
     args = parser.parse_args()
+    if args.recall_case:
+        case = json.loads(args.recall_case.read_text())
+        result = score_recall(case['expected_recall'], case['actual_recall'])
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result['passed'] else 1
     cases = json.loads((ROOT/'tests/fixtures/compaction-evals.json').read_text())
     if args.run:
         if not args.endpoint or not args.endpoint.startswith('https://') or not args.model:
