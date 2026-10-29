@@ -20,6 +20,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
 @property BOOL finished;
 @property BOOL doneMarker;
 @property BOOL finishReason;
+@property (nonatomic,copy) NSString *finishCause;
 @end
 @implementation AHProvider
 - (void)sendTo:(NSURL *)url model:(NSString *)model key:(NSString *)key messages:(NSArray *)messages tools:(NSArray *)tools streaming:(BOOL)streaming delta:(void (^)(NSString *))delta completion:(void (^)(NSDictionary *, NSError *))completion {
@@ -30,7 +31,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
     [request setValue:streaming ? @"text/event-stream" : @"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
     NSError *error = nil;
-    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"model":model, @"messages":messages, @"tools":tools, @"stream":@(streaming), @"max_tokens":@1024} options:0 error:&error];
+    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"model":model, @"messages":messages, @"tools":tools, @"stream":@(streaming), @"max_tokens":@(self.maxOutputTokens ?: 4096)} options:0 error:&error];
     if (error) { completion(nil, error); return; }
     NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
     config.timeoutIntervalForResource = 180;
@@ -73,7 +74,7 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
     id choice = choices[0];
     id delta = [choice isKindOfClass:NSDictionary.class] ? choice[@"delta"] : nil;
     if (![delta isKindOfClass:NSDictionary.class]) { [self fail:@"SSE delta không hợp lệ."]; return; }
-    if ([choice[@"finish_reason"] isKindOfClass:NSString.class]) self.finishReason = YES;
+    if ([choice[@"finish_reason"] isKindOfClass:NSString.class]) { self.finishReason = YES; self.finishCause=choice[@"finish_reason"]; }
     id content = delta[@"content"];
     if ([content isKindOfClass:NSString.class]) {
         if (self.text.length + [content length] > 32000) { [self fail:@"Câu trả lời vượt giới hạn 32.000 ký tự."]; return; }
@@ -138,10 +139,14 @@ static NSError *AHError(NSString *message) { return [NSError errorWithDomain:@"A
         } else {
             id choices = [body isKindOfClass:NSDictionary.class] ? body[@"choices"] : nil;
             id value = [choices isKindOfClass:NSArray.class] && [choices count] && [choices[0] isKindOfClass:NSDictionary.class] ? choices[0][@"message"] : nil;
-            if ([value isKindOfClass:NSDictionary.class]) message = value;
+            if ([value isKindOfClass:NSDictionary.class]) { message = value;
+                if([choices[0][@"finish_reason"] isKindOfClass:NSString.class]) self.finishCause=choices[0][@"finish_reason"];
+            }
             else failure = AHError(@"Provider không trả choices[].message của Chat Completions.");
         }
     }
+    if(!failure && [self.finishCause isEqual:@"length"]) failure=AHError(@"Provider đã chạm giới hạn token đầu ra; câu trả lời chưa hoàn tất. Có thể yêu cầu tiếp tục.");
+    if(!failure && [self.finishCause isEqual:@"content_filter"]) failure=AHError(@"Provider đã dừng câu trả lời bằng bộ lọc nội dung.");
     void (^completion)(NSDictionary *, NSError *) = self.completion;
     self.completion = nil; self.delta = nil; self.key = nil;
     [self.session finishTasksAndInvalidate]; self.session = nil; self.task = nil;

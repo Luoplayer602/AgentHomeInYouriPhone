@@ -1,6 +1,15 @@
-# Agent Home — nền tảng v0.7.0
+# Agent Home — nền tảng v0.7.1
 
 App iOS và daemon độc lập dành cho iPhone jailbreak rootless. Đích hiện tại: iPhone 6s, iOS 15, Dopamine; build bằng Theos trong WSL2.
+
+## Bản 0.7.1 — chẩn đoán khóa màn hình và phản hồi bị cắt
+
+- Giới hạn output mặc định tăng từ 1.024 lên 4.096 token. Provider `finish_reason=length` hoặc content_filter được báo là phản hồi gián đoạn, không đánh dấu completed âm thầm; nhật ký ghi finish_reason. Không tự gọi tiếp làm phát sinh request ngoài ý muốn.
+- Key của lượt đang chạy được giữ trong RAM qua các vòng tool và bỏ tham chiếu khi kết thúc. Không thay đổi mức bảo vệ Keychain và không ghi key vào SQLite. Lượt mới bắt đầu khi đã khóa vẫn có thể cần mở khóa để lấy key.
+- Một power assertion `PreventUserIdleSystemSleep` được yêu cầu chỉ trong lượt AI; không yêu cầu giữ sáng màn hình, được nhả khi xong/lỗi/hủy và có timeout 900 giây. Mã trả về được ghi trong Tác vụ (0 = API chấp nhận); iOS có thể không đáp ứng yêu cầu trong một số trạng thái. Tham khảo [IOKit IOPMLib của Apple](https://github.com/apple-oss-distributions/IOKitUser/blob/main/pwr_mgt.subproj/IOPMLib.h).
+- Cả lượt có watchdog 15 phút. Không giữ máy thức khi idle.
+
+Chẩn đoán trước sửa trên thiết bị: lượt gần nhất có state completed, partial 3.823 ký tự, không có lỗi. Vì bản cũ bỏ qua finish_reason nên chưa kết luận nó dừng do khóa màn hình hay chạm max_tokens. Đã dừng daemon thủ công cũ PID 11205, còn lại daemon hiện tại. Cần kiểm tra lại với yêu cầu dài rồi khóa máy 30–60 giây; xem finish_reason và power assertion trong nhật ký nếu vẫn bị cắt.
 
 ## Bản 0.7.0 — AI chạy trong daemon
 
@@ -11,7 +20,7 @@ App gửi `ai.submit` gồm request ID, text và metadata provider; daemon đọ
 - Partial response/context/tool round được checkpoint trong SQLite. Final assistant message và trạng thái kết thúc lưu cùng transaction, không có app ghi thêm lần nữa.
 - Nút Dừng gọi daemon. Quay về danh sách được khi đang trả lời; trở lại chat hoặc mở lại app sẽ nối lại tiến độ. Chat tắt không hủy provider request.
 - Restart daemon: task read-only được retry; request AI đang chạy đánh dấu failed và giữ partial kèm nhãn gián đoạn. Không tự phát lại request có thể đã tính phí. Queued job chưa gọi mạng vẫn được chạy.
-- Cần thiết bị mở khóa khi daemon lấy key từ Keychain (`WhenUnlockedThisDeviceOnly`). Các tool round tiếp theo cũng cần đọc key. Khả năng Keychain trên Dopamine thực tế cần kiểm chứng sau khi cài; nếu lỗi UI sẽ báo rõ. Không đảm bảo tiếp tục khi jailbreak bị tắt hoặc daemon bị hệ thống dừng.
+- Cần thiết bị mở khóa khi daemon lấy key từ Keychain (`WhenUnlockedThisDeviceOnly`). Từ 0.7.1, các tool round của cùng lượt dùng key đã giữ trong RAM. Khả năng Keychain trên Dopamine thực tế cần kiểm chứng sau khi cài; nếu lỗi UI sẽ báo rõ. Không đảm bảo tiếp tục khi jailbreak bị tắt hoặc daemon bị hệ thống dừng.
 
 Kiểm tra thiết bị sau khi cài và restart daemon:
 
@@ -105,14 +114,14 @@ Cần SDK iPhoneOS15.6 và toolchain arm64 trong Theos. Nếu Theos ở vị tr�
 Thay `PHONE_IP` bằng IP máy. Thiết bị cần đang jailbreak, đã cài OpenSSH. Chép gói mới nhất bằng tên thực tế ở `packages/`:
 
 ```bash
-scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.7.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
+scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.7.1_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
 ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP
 ```
 
 Trong shell iPhone, dùng quyền quản trị để cài gói (ví dụ `sudo`, nếu đã cấu hình):
 
 ```bash
-sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.7.0_iphoneos-arm64.deb
+sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.7.1_iphoneos-arm64.deb
 sudo launchctl bootstrap system /var/jb/Library/LaunchDaemons/dev.agenthome.daemon.plist
 sudo launchctl kickstart -k system/dev.agenthome.daemon
 sudo uicache -p /var/jb/Applications/AgentHome.app

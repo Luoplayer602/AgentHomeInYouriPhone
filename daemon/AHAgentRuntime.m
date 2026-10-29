@@ -1,4 +1,5 @@
 #import "AHAgentRuntime.h"
+#import "AHActivityLease.h"
 #import "../app/AHProvider.h"
 #import "../app/AHProviderConfig.h"
 #import "../app/AHProfiles.h"
@@ -15,6 +16,8 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
 @property (nonatomic,strong) NSDictionary *config;
 @property (nonatomic,strong) NSMutableString *partial;
 @property NSInteger round;
+@property (nonatomic,copy) NSString *activeKey;
+@property (nonatomic,strong) AHActivityLease *lease;
 @property NSTimeInterval lastCheckpoint;
 @end
 @implementation AHAgentRuntime
@@ -83,6 +86,14 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
     if(!run) return;
     if(AHTaskTransition(self.db,[run[@"id"] UTF8String],"queued","running","","Provider request started")!=SQLITE_OK) return;
     self.activeID=run[@"id"]; self.config=parse(run[@"config"]); self.context=[parse(run[@"context"]) mutableCopy]; self.partial=[NSMutableString string]; self.round=[run[@"round"] integerValue];
+    self.activeKey=AHReadKey(self.config[@"id"]);
+    self.lease=[AHActivityLease new]; int32_t power=[self.lease begin];
+    NSString *note=[NSString stringWithFormat:@"Power assertion result: %d (0=accepted); display may lock",(int)power];
+    AHTaskEvent(self.db,self.activeID.UTF8String,"running",note.UTF8String);
+    NSString *identifier=self.activeID;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,900*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if([self.activeID isEqual:identifier]) { [self.provider cancel]; self.provider=nil; [self finish:@"failed" error:@"Đã đạt giới hạn thời gian 15 phút cho một lượt." answer:nil]; }
+    });
     [self request];
 }
 - (void)checkpoint {
@@ -90,16 +101,21 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
     self.lastCheckpoint=NSDate.timeIntervalSinceReferenceDate;
 }
 - (void)request {
-    NSString *key=AHReadKey(self.config[@"id"]);
-    if(!key.length) { [self finish:@"failed" error:@"Daemon không đọc được API key. Mở khóa thiết bị, kiểm tra entitlement Keychain rồi gửi lại." answer:nil]; return; }
+    NSString *key=self.activeKey;
+    if(!key.length) { [self finish:@"failed" error:@"Daemon không đọc được API key khi bắt đầu lượt. Mở khóa thiết bị rồi gửi lại." answer:nil]; return; }
     NSString *identifier=self.activeID; self.provider=[AHProvider new];
     NSDictionary *tool=@{@"type":@"function",@"function":@{@"name":@"system_info",@"description":@"Read OS and disk space. Read-only risk 0.",@"parameters":@{@"type":@"object",@"properties":@{},@"additionalProperties":@NO}}};
     [self.provider sendTo:[NSURL URLWithString:self.config[@"endpoint"]] model:self.config[@"model"] key:key messages:self.context tools:@[tool] streaming:![self.config[@"disableStreaming"] boolValue] delta:^(NSString *delta){
         if(![self.activeID isEqual:identifier]) return; [self.partial appendString:delta];
         if(NSDate.timeIntervalSinceReferenceDate-self.lastCheckpoint>0.2) [self checkpoint];
     } completion:^(NSDictionary *message,NSError *error){
-        if(![self.activeID isEqual:identifier]) return; self.provider=nil;
-        if(error) { [self finish:@"failed" error:error.localizedDescription answer:nil]; return; }
+        if(![self.activeID isEqual:identifier]) return;
+        NSString *finish=[NSString stringWithFormat:@"Provider finish_reason: %@",self.provider.finishCause ?: @"not supplied"];
+        AHTaskEvent(self.db,identifier.UTF8String,"running",finish.UTF8String); self.provider=nil;
+        if(error) {
+            if(!self.partial.length && [message[@"content"] isKindOfClass:NSString.class]) [self.partial appendString:message[@"content"]];
+            [self finish:@"failed" error:error.localizedDescription answer:nil]; return;
+        }
         id calls=message[@"tool_calls"];
         if([calls isKindOfClass:NSArray.class] && [calls count]) {
             if(self.round>=3 || [calls count]>4) { [self finish:@"failed" error:@"Tool limit exceeded" answer:nil]; return; }
@@ -129,6 +145,7 @@ static id parse(NSString *s) { return [NSJSONSerialization JSONObjectWithData:[s
     if(ok) ok=[self sql:@"COMMIT" values:@[]]; if(!ok) { [self sql:@"ROLLBACK" values:@[]];
         [self sql:@"UPDATE tasks SET state='failed',result='Could not commit assistant response' WHERE id=? AND state='running'" values:@[identifier]];
     }
+    [self.lease end]; self.lease=nil; self.activeKey=nil;
     self.activeID=nil; self.context=nil; self.config=nil; self.partial=nil; self.provider=nil;
     dispatch_async(dispatch_get_main_queue(),^{ [self startNext]; });
 }
