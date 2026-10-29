@@ -1,6 +1,28 @@
-# Agent Home — nền tảng v0.6.0
+# Agent Home — nền tảng v0.7.0
 
 App iOS và daemon độc lập dành cho iPhone jailbreak rootless. Đích hiện tại: iPhone 6s, iOS 15, Dopamine; build bằng Theos trong WSL2.
+
+## Bản 0.7.0 — AI chạy trong daemon
+
+App gửi `ai.submit` gồm request ID, text và metadata provider; daemon đọc API key từ access group Keychain chung, dựng context và chạy streaming/tool loop. API key không truyền qua IPC hoặc ghi SQLite. App chỉ poll tiến độ và lịch sử; socket đọc theo chunk để giảm syscall khi poll.
+
+- Mỗi hội thoại tối đa một lượt đang queued/running; toàn thiết bị chạy một request AI tại một thời điểm để hạn chế RAM. Hội thoại khác có thể chờ trong queue.
+- Submit có ID ổn định và thử lại cùng ID khi mất phản hồi, tránh lưu trùng tin user. User message, config snapshot và job được lưu cùng transaction.
+- Partial response/context/tool round được checkpoint trong SQLite. Final assistant message và trạng thái kết thúc lưu cùng transaction, không có app ghi thêm lần nữa.
+- Nút Dừng gọi daemon. Quay về danh sách được khi đang trả lời; trở lại chat hoặc mở lại app sẽ nối lại tiến độ. Chat tắt không hủy provider request.
+- Restart daemon: task read-only được retry; request AI đang chạy đánh dấu failed và giữ partial kèm nhãn gián đoạn. Không tự phát lại request có thể đã tính phí. Queued job chưa gọi mạng vẫn được chạy.
+- Cần thiết bị mở khóa khi daemon lấy key từ Keychain (`WhenUnlockedThisDeviceOnly`). Các tool round tiếp theo cũng cần đọc key. Khả năng Keychain trên Dopamine thực tế cần kiểm chứng sau khi cài; nếu lỗi UI sẽ báo rõ. Không đảm bảo tiếp tục khi jailbreak bị tắt hoặc daemon bị hệ thống dừng.
+
+Kiểm tra thiết bị sau khi cài và restart daemon:
+
+1. Giữ máy mở khóa. Gửi yêu cầu trả lời dài, xem chữ hiện dần.
+2. Đóng/force-quit app khi đang trả lời, chờ rồi mở lại: câu trả lời phải còn và không có tin trùng.
+3. Quay về danh sách, mở chat khác để gửi lượt chờ; kiểm tra mỗi hội thoại riêng.
+4. Nhấn Dừng giữa phản hồi, kiểm tra partial được lưu có nhãn.
+5. Yêu cầu dùng tool kiểm tra dung lượng; xem nhật ký trong Tác vụ.
+6. Restart daemon giữa request: UI báo gián đoạn, không tự gọi API lại. Queued read-only task vẫn phục hồi.
+
+Host checks: `python3 tests/runtime_db_test.py` kiểm tra SQL thực của runtime cho enqueue/complete nguyên tử, duplicate rollback, checkpoint và recovery không replay. Các test C++ database/tasks vẫn áp dụng. Build và entitlement đã kiểm tra trên WSL; request nền và Keychain cần chạy thử trên iPhone thật.
 
 ## Bản 0.6.0 — hàng đợi tác vụ và context
 
@@ -67,7 +89,7 @@ Sau khi cài trên iPhone: kiểm tra chuyển provider, form theo type và Stre
 - SQLite lưu riêng từng hội thoại, tải tối đa 100 tin gần nhất trong giới hạn khung IPC; giới hạn context gửi API khoảng 16.000 ký tự. API key lưu Keychain, không lưu trong SQLite.
 - IPC có giới hạn kích thước và timeout. Không có cổng TCP lắng nghe.
 
-**Chưa triển khai:** scheduler/checkpoint nhiệm vụ, memory ngữ nghĩa, phê duyệt quyền tương tác, tool đặc quyền, provider adapter Anthropic/Gemini, UI Automation, MCP, Live2D và multi-agent. Bản đầu dùng allowlist cố định thay cho Risk Engine đầy đủ. Khi đóng app, hội thoại được lưu nhưng yêu cầu AI đang chạy chưa được chuyển sang daemon; daemon chỉ phục vụ IPC và lưu dữ liệu.
+**Chưa triển khai:** scheduler, compact context, memory ngữ nghĩa, phê duyệt quyền tương tác, tool đặc quyền, adapter native Anthropic/Gemini, UI Automation, MCP, Live2D và multi-agent. Runtime dùng allowlist cố định cho tool read-only, chưa phải Risk Engine đầy đủ. Từ 0.7.0 yêu cầu AI và checkpoint chạy trong daemon.
 
 ## Build
 
@@ -83,14 +105,14 @@ Cần SDK iPhoneOS15.6 và toolchain arm64 trong Theos. Nếu Theos ở vị tr�
 Thay `PHONE_IP` bằng IP máy. Thiết bị cần đang jailbreak, đã cài OpenSSH. Chép gói mới nhất bằng tên thực tế ở `packages/`:
 
 ```bash
-scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.6.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
+scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.7.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
 ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP
 ```
 
 Trong shell iPhone, dùng quyền quản trị để cài gói (ví dụ `sudo`, nếu đã cấu hình):
 
 ```bash
-sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.6.0_iphoneos-arm64.deb
+sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.7.0_iphoneos-arm64.deb
 sudo launchctl bootstrap system /var/jb/Library/LaunchDaemons/dev.agenthome.daemon.plist
 sudo launchctl kickstart -k system/dev.agenthome.daemon
 sudo uicache -p /var/jb/Applications/AgentHome.app
@@ -131,7 +153,7 @@ Trên iPhone sau khi nâng cấp:
 4. Hỏi “Dùng công cụ kiểm tra máy còn bao nhiêu dung lượng”: kiểm tra trạng thái gọi công cụ và kết quả.
 5. Tắt Streaming trong API rồi thử lại để kiểm tra chế độ JSON thông thường.
 
-Giới hạn: yêu cầu AI vẫn chạy trong tiến trình app, chưa có tiếp tục tác vụ khi app bị đóng. Dừng hủy request trên thiết bị; provider có thể vẫn tính phí phần đã xử lý. Streaming có thể tới theo cụm nếu proxy buffer dữ liệu. Chỉ lưu phần nhận được khi dừng chủ động hoặc lỗi được xử lý, chưa checkpoint từng token khi app bị kill. Phần reasoning riêng của provider không được hiển thị/lưu.
+Giới hạn: Dừng hủy request trên thiết bị; provider có thể vẫn tính phí phần đã xử lý. Streaming có thể tới theo cụm nếu proxy buffer dữ liệu. Checkpoint khoảng 0,2 giây, không bảo đảm lưu từng token ngay trước khi daemon bị kill. Reasoning riêng của provider không được hiển thị/lưu.
 
 ## Kiểm tra IPC trên thiết bị
 

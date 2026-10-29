@@ -35,10 +35,10 @@
     });
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.tasks.count; }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return @"Kiểm tra tạo tác vụ đọc dung lượng trong daemon, không dùng API AI. Kết quả và nhật ký được lưu dù app đóng. Nhấn một tác vụ để xem. Chat AI nền chưa được chuyển sang daemon."; }
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return @"Kiểm tra tạo tác vụ đọc dung lượng trong daemon, không dùng API AI. Kết quả và nhật ký được lưu dù app đóng. Nhấn một tác vụ để xem. Chat AI cũng chạy trong daemon; câu trả lời nằm trong hội thoại."; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil]; NSDictionary *task=self.tasks[path.row];
-    cell.textLabel.text=[NSString stringWithFormat:@"Thông tin thiết bị · %@",task[@"state"]]; cell.textLabel.numberOfLines=0;
+    cell.textLabel.text=[NSString stringWithFormat:@"%@ · %@",[task[@"tool"] isEqual:@"chat.ai"]?@"Chat AI":@"Thông tin thiết bị",task[@"state"]]; cell.textLabel.numberOfLines=0;
     cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",task[@"created_at"],[task[@"id"] substringToIndex:8]]; cell.detailTextLabel.textColor=UIColor.secondaryLabelColor; return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {

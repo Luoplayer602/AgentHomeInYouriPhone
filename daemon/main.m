@@ -1,4 +1,5 @@
 #import "../shared/AHProtocol.h"
+#import "AHAgentRuntime.h"
 #import <sqlite3.h>
 #import "../shared/AHDatabase.h"
 #import <sys/socket.h>
@@ -9,7 +10,9 @@
 #import <signal.h>
 #import <errno.h>
 static sqlite3 *db;
+static AHAgentRuntime *agent;
 static id execute(NSString *method, NSDictionary *params, NSString **error) {
+    if([method hasPrefix:@"ai."]) return [agent handle:method params:params error:error];
     if ([method isEqual:@"system.info"]) {
         struct statvfs fs;
         if (statvfs("/var/mobile", &fs)) { *error = @"Cannot read storage"; return nil; }
@@ -28,10 +31,10 @@ static id execute(NSString *method, NSDictionary *params, NSString **error) {
         NSString *conversation=params[@"conversation_id"];
         if(![conversation isKindOfClass:NSString.class]) { *error=@"Invalid conversation"; return nil; }
         sqlite3_stmt *s=NULL;
-        if(sqlite3_prepare_v2(db,"SELECT id,state,result,created_at FROM tasks WHERE conversation_id=? ORDER BY rowid DESC LIMIT 50",-1,&s,NULL)!=SQLITE_OK) { *error=@"Task read failed"; return nil; }
+        if(sqlite3_prepare_v2(db,"SELECT id,state,result,created_at,tool FROM tasks WHERE conversation_id=? ORDER BY rowid DESC LIMIT 50",-1,&s,NULL)!=SQLITE_OK) { *error=@"Task read failed"; return nil; }
         sqlite3_bind_text(s,1,conversation.UTF8String,-1,SQLITE_TRANSIENT);
         NSMutableArray *items=[NSMutableArray array];
-        while(sqlite3_step(s)==SQLITE_ROW) [items addObject:@{@"id":@((const char *)sqlite3_column_text(s,0)),@"state":@((const char *)sqlite3_column_text(s,1)),@"result":@((const char *)sqlite3_column_text(s,2)),@"created_at":@((const char *)sqlite3_column_text(s,3))}];
+        while(sqlite3_step(s)==SQLITE_ROW) [items addObject:@{@"id":@((const char *)sqlite3_column_text(s,0)),@"state":@((const char *)sqlite3_column_text(s,1)),@"result":@((const char *)sqlite3_column_text(s,2)),@"created_at":@((const char *)sqlite3_column_text(s,3)),@"tool":@((const char *)sqlite3_column_text(s,4))}];
         sqlite3_finalize(s); return @{@"tasks":items};
     }
     if ([method isEqual:@"task.events"]) {
@@ -147,7 +150,11 @@ static void serve(int fd) {
     NSString *error = nil;
     id result = nil;
     BOOL valid = [request isKindOfClass:NSDictionary.class] && [request[@"id"] isKindOfClass:NSString.class] && [request[@"method"] isKindOfClass:NSString.class] && [request[@"params"] isKindOfClass:NSDictionary.class];
-    if (valid) result = execute(request[@"method"], request[@"params"], &error);
+    if (valid) {
+        __block id responseResult=nil; __block NSString *responseError=nil;
+        dispatch_sync(dispatch_get_main_queue(),^{ responseResult=execute(request[@"method"],request[@"params"],&responseError); });
+        result=responseResult; error=responseError;
+    }
     else error = @"Invalid request";
     NSMutableDictionary *response = [@{@"id": valid ? request[@"id"] : @""} mutableCopy];
     response[error ? @"error" : @"result"] = error ?: result;
@@ -159,7 +166,7 @@ static void serve(int fd) {
 static void runQueuedTasks(void) {
     for(;;) { @autoreleasepool {
         sqlite3_stmt *s=NULL;
-        if(sqlite3_prepare_v2(db,"SELECT id FROM tasks WHERE state='queued' ORDER BY rowid LIMIT 1",-1,&s,NULL)!=SQLITE_OK) return;
+        if(sqlite3_prepare_v2(db,"SELECT id FROM tasks WHERE state='queued' AND tool='system.info' ORDER BY rowid LIMIT 1",-1,&s,NULL)!=SQLITE_OK) return;
         NSString *identifier=nil;
         if(sqlite3_step(s)==SQLITE_ROW) identifier=@((const char *)sqlite3_column_text(s,0));
         sqlite3_finalize(s); if(!identifier) return;
@@ -176,11 +183,19 @@ int main(void) { @autoreleasepool {
     if (sqlite3_open([AHDataPath stringByAppendingPathComponent:@"memory.sqlite"].UTF8String, &db) != SQLITE_OK) return 2;
     if (AHMigrate(db) != SQLITE_OK) return 3;
     if(AHTaskRecover(db)!=SQLITE_OK) return 6;
+    agent=[[AHAgentRuntime alloc] initWithDatabase:db tool:^NSDictionary *(NSString *name){ NSString *error=nil; return execute(name,@{},&error); }];
+    [agent recoverAndStart];
     runQueuedTasks();
     int listener = socket(AF_UNIX, SOCK_STREAM, 0);
     struct sockaddr_un address = {0}; address.sun_family = AF_UNIX;
     strlcpy(address.sun_path, AHSocketPath, sizeof(address.sun_path));
     unlink(AHSocketPath);
     if (bind(listener, (struct sockaddr *)&address, sizeof(address)) || chmod(AHSocketPath, 0600) || listen(listener, 8)) return 4;
-    for (;;) { int fd = accept(listener, NULL, NULL); if (fd < 0) { if (errno == EINTR) continue; return 5; } @autoreleasepool { serve(fd); } close(fd); runQueuedTasks(); }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        for (;;) { int fd=accept(listener,NULL,NULL); if(fd<0) { if(errno==EINTR) continue; _exit(5); }
+            @autoreleasepool { serve(fd); } close(fd);
+            dispatch_sync(dispatch_get_main_queue(),^{ runQueuedTasks(); });
+        }
+    });
+    dispatch_main();
 } }

@@ -3,6 +3,8 @@
 #import <sys/socket.h>
 #import <sys/un.h>
 #import <unistd.h>
+#import <string.h>
+#import <errno.h>
 @implementation AHClient
 + (NSDictionary *)call:(NSString *)method params:(NSDictionary *)params error:(NSError **)error {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -23,9 +25,16 @@
         while (left) { ssize_t n = write(fd, p, left); if (n <= 0) { failure = @"IPC write failed"; break; } p += n; left -= n; }
     }
     if (!failure) {
-        NSMutableData *input = [NSMutableData data]; char c = 0;
-        while (input.length < AHMaxFrame && read(fd, &c, 1) == 1 && c != '\n') [input appendBytes:&c length:1];
-        if (c != '\n') failure = @"IPC response incomplete";
+        NSMutableData *input = [NSMutableData data]; BOOL complete=NO; char chunk[4096];
+        while(input.length<AHMaxFrame) {
+            ssize_t n=read(fd,chunk,MIN(sizeof(chunk),AHMaxFrame-input.length));
+            if(n<0 && errno==EINTR) continue;
+            if(n<=0) break;
+            const char *newline=memchr(chunk,'\n',(size_t)n);
+            [input appendBytes:chunk length:newline?(NSUInteger)(newline-chunk):(NSUInteger)n];
+            if(newline) { complete=YES; break; }
+        }
+        if (!complete) failure = @"IPC response incomplete";
         else {
             id value = [NSJSONSerialization JSONObjectWithData:input options:0 error:nil];
             if (![value isKindOfClass:NSDictionary.class] || ![value[@"id"] isEqual:identifier]) failure = @"Invalid IPC response";

@@ -2,7 +2,6 @@
 #import <Security/Security.h>
 #import "AHClient.h"
 #import "AHProviderConfig.h"
-#import "AHProvider.h"
 #import "AHProfiles.h"
 #import "AHMarkdown.h"
 #import "AHInput.h"
@@ -64,18 +63,19 @@
 @interface AHController : UIViewController <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong) UITableView *chat;
 @property (nonatomic, strong) UILabel *statusLabel;
-@property (nonatomic, strong) AHProvider *provider;
 @property (nonatomic, strong) NSMutableString *draft;
 @property NSUInteger runID;
 @property BOOL running;
-@property BOOL requestStreaming;
-@property BOOL renderScheduled;
 @property UITextField *input;
 @property UIButton *sendButton;
 @property NSMutableArray *messages;
 @property BOOL busy;
 @property (nonatomic,strong) UIButton *contextButton;
 @property NSUInteger historyCount;
+@property (nonatomic,strong) NSTimer *pollTimer;
+@property BOOL polling;
+@property NSTimeInterval lastPoll;
+@property (nonatomic,copy) NSString *aiTaskID;
 @property (nonatomic, copy) NSString *conversationID;
 @end
 @implementation AHController
@@ -117,13 +117,14 @@
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
         NSError *error = nil; [AHClient call:@"chat.touch" params:@{@"conversation_id":self.conversationID} error:nil];
         NSDictionary *result = [AHClient call:@"chat.list" params:@{@"conversation_id":self.conversationID} error:&error];
-        dispatch_async(dispatch_get_main_queue(), ^{ [self setWorking:NO]; if (result) { [self.messages addObjectsFromArray:result[@"messages"]]; self.historyCount=[result[@"total_messages"] unsignedIntegerValue]; [self render]; } else [self show:error.localizedDescription]; });
+        dispatch_async(dispatch_get_main_queue(), ^{ [self setWorking:NO]; if (result) { [self.messages addObjectsFromArray:result[@"messages"]]; self.historyCount=[result[@"total_messages"] unsignedIntegerValue]; [self render]; [self poll]; } else [self show:error.localizedDescription]; });
     });
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     self.input.font=[UIFont systemFontOfSize:AHChatFontSize()];
     [self render];
+    [self startPolling];
     if(!self.busy) self.statusLabel.text=[NSString stringWithFormat:@"%@ · %@",AHActiveProfile()[@"name"],AHActiveProfile()[@"model"]];
 }
 - (void)show:(NSString *)message {
@@ -165,7 +166,7 @@
     [self presentViewController:navigation animated:YES completion:nil];
 }
 - (void)back {
-    if (self.busy) return;
+    if (self.busy && !self.running) return;
     [self.view endEditing:YES];
     [self.navigationController popViewControllerAnimated:YES];
 }
@@ -183,128 +184,64 @@
     });
 }
 - (void)setWorking:(BOOL)working {
-    self.navigationItem.leftBarButtonItem.enabled = !working;
+    self.navigationItem.leftBarButtonItem.enabled = !working || self.running;
     for (UIBarButtonItem *item in self.navigationItem.rightBarButtonItems) item.enabled = !working;
-    self.navigationController.interactivePopGestureRecognizer.enabled = !working;
+    self.navigationController.interactivePopGestureRecognizer.enabled = !working || self.running;
     self.busy = working; self.sendButton.enabled = !working || self.running; self.input.enabled = !working;
     [self.sendButton setTitle:(working && self.running) ? @"Dừng" : @"Gửi" forState:UIControlStateNormal];
     self.title = @"Agent Home";
     if (!working && [self.statusLabel.text isEqual:@"Đang tải hội thoại…"]) self.statusLabel.text = @"Sẵn sàng.";
 }
 - (void)send {
-    if (self.busy) { [self stop]; return; }
-    NSString *text = [self.input.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (self.busy || !text.length) return;
-    if (text.length > 8000) { [self show:@"Tin nhắn tối đa 8.000 ký tự trong bản đầu."]; return; }
+    if(self.busy) { [self stop]; return; }
+    NSString *text=[self.input.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!text.length) return; if(text.length>8000) { [self show:@"Tin nhắn tối đa 8.000 ký tự."]; return; }
     NSDictionary *profile=AHActiveProfile();
-    NSString *endpoint=profile[@"endpoint"], *model=profile[@"model"], *key=AHReadKey(profile[@"id"]);
-    self.requestStreaming=![profile[@"disableStreaming"] boolValue];
-    if (!endpoint.length || !model.length || !key.length) { [self settings]; return; }
-    self.running = NO; ++self.runID; NSUInteger run = self.runID; self.draft = [NSMutableString string];
-    [self setWorking:YES];
-    NSDictionary *message = @{@"role":@"user", @"content":text};
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
-        NSError *error = nil; [AHClient call:@"chat.append" params:@{@"role":message[@"role"],@"content":message[@"content"],@"conversation_id":self.conversationID} error:&error];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (self.runID != run) return;
-            if (error) { self.running = NO; [self setWorking:NO]; [self show:error.localizedDescription]; return; }
-            self.running = YES; [self setWorking:YES];
-            self.historyCount++; [self.messages addObject:message]; self.input.text = @""; [self render];
-            NSString *system = [NSString stringWithFormat:@"Bạn là trợ lý Agent Home. Model ID đang cấu hình là %@; đây là ID do provider cung cấp, không xác minh danh tính mô hình phía sau. Chỉ có công cụ system_info đọc dung lượng và phiên bản hệ điều hành. Không khẳng định đã thực hiện hành động nếu chưa có kết quả công cụ.", model];
-            NSMutableArray *context = [NSMutableArray arrayWithObject:@{@"role":@"system", @"content":system}];
-            // Keep outbound context bounded on the 2 GB device.
-            [context addObjectsFromArray:AHContextSnapshot(self.messages,self.historyCount)[@"messages"]];
-            [self request:context endpoint:endpoint model:model key:key round:0];
+    if(![profile[@"endpoint"] length] || !AHReadKey(profile[@"id"]).length) { [self settings]; return; }
+    ++self.runID; self.running=NO; [self setWorking:YES]; NSString *identifier=NSUUID.UUID.UUIDString;
+    // Keep submission ID stable until its outcome is known, making retry safe.
+    NSDictionary *request=@{@"id":identifier,@"conversation_id":self.conversationID,@"text":text,@"profile":profile};
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        NSError *error=nil; NSDictionary *result=[AHClient call:@"ai.submit" params:request error:&error];
+        if(!result) result=[AHClient call:@"ai.submit" params:request error:&error];
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(result) { self.aiTaskID=result[@"id"]; self.input.text=@""; self.running=YES; [self setWorking:YES]; [self poll]; }
+            else { [self setWorking:NO]; [self show:error.localizedDescription]; }
         });
     });
 }
-- (void)request:(NSMutableArray *)context endpoint:(NSString *)endpoint model:(NSString *)model key:(NSString *)key round:(NSUInteger)round {
-    NSUInteger run = self.runID;
-    if (!self.running) return;
-    NSDictionary *tool = @{@"type":@"function", @"function":@{@"name":@"system_info", @"description":@"Read iPhone OS version and disk space. Read-only, risk level 0.", @"parameters":@{@"type":@"object", @"properties":@{}, @"additionalProperties":@NO}}};
-    NSString *urlError = nil; NSURL *url = AHChatURL(endpoint, &urlError);
-    if (!url) { [self completeAnswer:nil error:[NSError errorWithDomain:@"AgentHome" code:1 userInfo:@{NSLocalizedDescriptionKey:urlError}]]; return; }
-    self.provider = [AHProvider new];
-    self.statusLabel.text = [NSString stringWithFormat:@"%@ · Đang chờ phản hồi…", model];
-    BOOL streaming = self.requestStreaming;
-    __weak AHController *weakSelf = self;
-    [self.provider sendTo:url model:model key:key messages:context tools:@[tool] streaming:streaming delta:^(NSString *delta) {
-        AHController *self = weakSelf; if (!self || self.runID != run || !self.running) return;
-        [self.draft appendString:delta]; self.statusLabel.text = @"Đang trả lời…";
-        [self scheduleRender];
-    } completion:^(NSDictionary *message, NSError *error) {
-        AHController *self = weakSelf; if (!self || self.runID != run || !self.running) return;
-        self.provider = nil;
-        if (error) { [self completeAnswer:nil error:error]; return; }
-        id calls = message[@"tool_calls"];
-        if ([calls isKindOfClass:NSArray.class] && [calls count]) {
-            if (round >= 3 || [calls count] > 4) { [self failRun:@"Đã đạt giới hạn gọi công cụ."]; return; }
-            // Validate the entire batch before executing any tool. Only system_info
-            // with an empty argument object is currently granted by policy.
-            for (id call in calls) {
-                if (![call isKindOfClass:NSDictionary.class] || ![call[@"function"] isKindOfClass:NSDictionary.class]) { [self failRun:@"Tool call không hợp lệ."]; return; }
-                id function = call[@"function"];
-                id args = [function isKindOfClass:NSDictionary.class] ? function[@"arguments"] : nil;
-                id parsed = [args isKindOfClass:NSString.class] ? [NSJSONSerialization JSONObjectWithData:[args dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
-                if (![call[@"id"] isKindOfClass:NSString.class] || ![call[@"id"] length] || ![function[@"name"] isEqual:@"system_info"] || ![parsed isKindOfClass:NSDictionary.class] || [parsed count]) { [self failRun:@"Tool call bị từ chối: chỉ cho phép system_info với tham số {}."]; return; }
-            }
-            [context addObject:message];
-            self.draft = [NSMutableString string]; [self render]; self.statusLabel.text = @"Công cụ: đọc dung lượng thiết bị…";
-            // Bound to one read-only capability; serial execution on background
-            // queue avoids blocking UI while the daemon responds.
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
-                NSMutableArray *outputs = [NSMutableArray array];
-                for (NSDictionary *call in calls) {
-                    NSError *toolError = nil; id result = [AHClient call:@"system.info" params:@{} error:&toolError];
-                    NSString *content = result ? [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:result options:0 error:nil] encoding:NSUTF8StringEncoding] : toolError.localizedDescription;
-                    [outputs addObject:@{@"role":@"tool",@"tool_call_id":call[@"id"],@"content":content ?: @"Tool failed"}];
-                }
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (self.runID != run || !self.running) return;
-                    [context addObjectsFromArray:outputs]; [self request:context endpoint:endpoint model:model key:key round:round+1];
-                });
-            });
-            return;
-        }
-        id answer = message[@"content"];
-        if (![answer isKindOfClass:NSString.class] || ![answer length] || [answer length] > 32000) { [self failRun:@"Provider không trả văn bản hợp lệ."]; return; }
-        [self completeAnswer:answer error:nil];
-    }];
+- (void)startPolling {
+    [self.pollTimer invalidate]; self.lastPoll=0; __weak AHController *weak=self;
+    self.pollTimer=[NSTimer scheduledTimerWithTimeInterval:0.4 repeats:YES block:^(__unused NSTimer *timer){ [weak poll]; }];
+    [self poll];
 }
-- (void)failRun:(NSString *)reason {
-    [self completeAnswer:nil error:[NSError errorWithDomain:@"AgentHome" code:1 userInfo:@{NSLocalizedDescriptionKey:reason}]];
-}
-- (void)scheduleRender {
-    if (self.renderScheduled) return; self.renderScheduled = YES;
-    __weak AHController *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-        AHController *self = weakSelf; if (!self) return; self.renderScheduled = NO; [self render];
+- (void)viewWillDisappear:(BOOL)animated { [super viewWillDisappear:animated]; [self.pollTimer invalidate]; self.pollTimer=nil; }
+- (void)poll {
+    if(self.polling || (self.busy && !self.running)) return;
+    NSTimeInterval now=NSDate.timeIntervalSinceReferenceDate;
+    if(!self.running && now-self.lastPoll<2) return; self.lastPoll=now; self.polling=YES; NSUInteger generation=self.runID;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        NSError *error=nil; NSDictionary *snapshot=[AHClient call:@"ai.snapshot" params:@{@"conversation_id":self.conversationID} error:&error];
+        NSDictionary *history=snapshot?[AHClient call:@"chat.list" params:@{@"conversation_id":self.conversationID} error:&error]:nil;
+        dispatch_async(dispatch_get_main_queue(),^{
+            self.polling=NO; if(self.runID!=generation) return;
+            if(!snapshot || !history) { self.statusLabel.text=error.localizedDescription ?: @"Mất kết nối daemon"; return; }
+            BOOL changed=![self.messages isEqual:history[@"messages"]];
+            self.messages=[history[@"messages"] mutableCopy]; self.historyCount=[history[@"total_messages"] unsignedIntegerValue];
+            NSString *state=snapshot[@"state"]; BOOL active=[@[@"queued",@"running"] containsObject:state ?: @""];
+            NSString *partial=active?snapshot[@"partial"]:@""; if(![self.draft isEqual:partial]) changed=YES;
+            self.draft=[(partial ?: @"") mutableCopy]; self.aiTaskID=snapshot[@"id"];
+            self.running=active; [self setWorking:active];
+            self.statusLabel.text=active?([state isEqual:@"queued"]?@"Đang chờ daemon…":@"AI đang chạy trong daemon…") : ([state isEqual:@"failed"]?snapshot[@"result"]:@"Sẵn sàng · daemon");
+            if(changed) [self render];
+        });
     });
 }
 - (void)stop {
-    if (!self.running) return;
-    ++self.runID; [self.provider cancel]; self.provider = nil;
-    NSString *partial = self.draft.length ? [[self.draft substringToIndex:MIN(self.draft.length, (NSUInteger)31900)] stringByAppendingString:@"\n\n[Đã dừng]"] : nil;
-    self.statusLabel.text = @"Đã dừng yêu cầu.";
-    [self completeAnswer:partial error:nil];
-}
-- (void)completeAnswer:(NSString *)answer error:(NSError *)error {
-    self.running = NO;
-    NSString *text = answer;
-    if (!text.length && error && self.draft.length) text = [[self.draft substringToIndex:MIN(self.draft.length, (NSUInteger)31900)] stringByAppendingString:@"\n\n[Phản hồi bị gián đoạn]"];
-    self.draft = [NSMutableString string];
-    if (!text.length) { [self setWorking:NO]; [self render]; if (error) { self.statusLabel.text = @"Yêu cầu thất bại."; [self show:error.localizedDescription]; } return; }
-    NSDictionary *item = @{@"role":@"assistant", @"content":text};
-    self.historyCount++; [self.messages addObject:item]; [self render];
-    self.sendButton.enabled = NO;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
-        NSError *saveError = nil; [AHClient call:@"chat.append" params:@{@"role":item[@"role"],@"content":item[@"content"],@"conversation_id":self.conversationID} error:&saveError];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self setWorking:NO];
-            if (error) { self.statusLabel.text = @"Phản hồi bị gián đoạn."; [self show:error.localizedDescription]; }
-            else if (![text hasSuffix:@"[Đã dừng]"]) self.statusLabel.text = @"Đã lưu hội thoại.";
-            if (saveError) [self show:saveError.localizedDescription];
-        });
+    if(!self.aiTaskID.length) return; NSString *identifier=self.aiTaskID;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        NSError *error=nil; [AHClient call:@"ai.cancel" params:@{@"id":identifier} error:&error];
+        dispatch_async(dispatch_get_main_queue(),^{ if(error) [self show:error.localizedDescription]; [self poll]; });
     });
 }
 

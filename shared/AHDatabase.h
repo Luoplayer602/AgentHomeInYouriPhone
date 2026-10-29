@@ -29,7 +29,7 @@ static inline int AHMigrate(sqlite3 *db) {
     if (rc == SQLITE_OK) rc = AHAddColumn(db,"accessed_at","ALTER TABLE conversations ADD COLUMN accessed_at REAL NOT NULL DEFAULT 0");
     if (rc == SQLITE_OK) rc = sqlite3_exec(db,"UPDATE conversations SET accessed_at=updated_at WHERE accessed_at=0",0,0,0);
     if (rc == SQLITE_OK) rc = sqlite3_exec(db,AHTaskSchema,0,0,0);
-    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id); PRAGMA user_version=3; COMMIT", 0, 0, 0);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id); PRAGMA user_version=4; COMMIT", 0, 0, 0);
     if (rc != SQLITE_OK) sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
     sqlite3_exec(db, "PRAGMA foreign_keys=ON", 0, 0, 0);
     return rc;

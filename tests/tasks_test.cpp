@@ -15,6 +15,10 @@ int main() {
     assert(count(db,"SELECT count(*) FROM task_events WHERE task_id='one'")==5);
     assert(AHTaskCreate(db,"missing","unknown")!=SQLITE_OK);
     assert(count(db,"SELECT count(*) FROM tasks")==1);
+    assert(AHTaskCreate(db,"remote","legacy")==SQLITE_OK);
+    assert(sqlite3_exec(db,"UPDATE tasks SET tool='chat.ai',state='running' WHERE id='remote'",0,0,0)==SQLITE_OK);
+    assert(AHTaskRecover(db)==SQLITE_OK);
+    assert(count(db,"SELECT count(*) FROM tasks WHERE id='remote' AND state='running'")==1);
     sqlite3_close(db);
     // Reopen an actual file to ensure queued work survives process/database closure.
     const char *path="/tmp/agenthome-task-test.sqlite"; std::remove(path);

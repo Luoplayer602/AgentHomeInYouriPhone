@@ -2,13 +2,12 @@
 
 ```text
 UIKit app (mobile, ngoài container)
-  ├─ AHProvider → HTTPS → API tương thích OpenAI (SSE hoặc JSON, tool calling)
-  │    └─ core/stream/SSEDecoder.hpp → framing dữ liệu theo byte, giới hạn kích thước
-  ├─ Keychain → API key
+  ├─ Preferences + Keychain → cấu hình provider
   └─ Unix socket → agenthomed (mobile, launchd)
-                    ├─ allowlist: system.info / chat.list / chat.append / chat.create / chat.conversations
-                    ├─ statvfs + NSProcessInfo
-                    └─ SQLite → conversations + messages (conversation_id)
+                    ├─ AHAgentRuntime → AHProvider → HTTPS (SSE/JSON)
+                    │                    └─ Keychain access group chung
+                    ├─ system.info (allowlist read-only)
+                    └─ SQLite → conversations/messages/tasks/events/ai_runs
 ```
 
 `shared/AHProtocol.h` xác định framing và đường dẫn. Mỗi kết nối có một JSON request/response kết thúc bằng newline; `id` phải khớp. Params phải là object. Method chưa đăng ký bị từ chối. `system.info` là tool rủi ro 0; tool ghi duy nhất là lưu tin user/assistant và không nhận SQL tùy ý.
@@ -30,3 +29,5 @@ Từ 0.4.0: AHProfiles giữ metadata provider trong preferences, API key theo a
 Từ 0.5.0: AHSettings (grouped table) → AHSavedProviders → AHProviderTypes/AHProviderEditor; AHInput tách riêng để dùng lại trong form. Type `compatible` cho endpoint tùy chỉnh; type `gemini` preset Google compatibility endpoint. AHChatContent dựng các block text/code/table từ core/format/MarkdownBlocks.hpp, code Copy chỉ ghi UIPasteboard theo thao tác người dùng. Bảng dùng UILabel thay vì nhiều UITextView để giảm bộ nhớ. Parser được kiểm tra độc lập trên Linux.
 
 0.6.0 bổ sung task queue đọc-only trong daemon: AHTasks.h chứa schema, transition có điều kiện và audit transaction dùng chung với test host. Task được thực thi sau khi gửi phản hồi nhận hàng và xử lý khi daemon restart, không phụ thuộc vòng đời app. Runtime này chưa chạy model. AHContextSnapshot là nguồn duy nhất cho ngân sách tin nhắn gửi đi và chỉ báo ◉; compact được ghi thành yêu cầu riêng trong context-compaction.md.
+
+0.7.0: AHAgentRuntime chạy trên main queue daemon; socket accept/read trên một queue nền và dispatch request về main để SQLite không bị truy cập đồng thời. NSURLSession callbacks cùng main queue, có run loop dispatch_main. ai_runs lưu metadata/context/partial/round; Keychain dùng access group dev.agenthome.app được ký vào daemon. App không còn chứa vòng gọi provider, chỉ submit/poll/cancel. Các chat.ai running không thuộc recovery tự retry của system.info. Recovery thất bại AI + transcript partial dùng transaction; kiểm tra SQL thực trong runtime_db_test.py.
