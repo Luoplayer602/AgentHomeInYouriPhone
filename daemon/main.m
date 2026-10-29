@@ -185,7 +185,9 @@ static void runQueuedTasks(void) {
         if(AHTaskTransition(db,identifier.UTF8String,"running",info?"completed":"failed",result.UTF8String,info?"Result persisted":"Capability failed")!=SQLITE_OK) return;
     } }
 }
-int main(void) { @autoreleasepool {
+extern int AHMemorySelfTest(void);
+int main(int argc,const char *argv[]) { @autoreleasepool {
+    if(argc==2 && strcmp(argv[1],"--self-test-memory")==0) return AHMemorySelfTest();
     signal(SIGPIPE, SIG_IGN); umask(0077);
     NSError *error = nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:AHDataPath withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0700} error:&error]) return 1;

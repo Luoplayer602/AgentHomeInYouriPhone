@@ -73,3 +73,23 @@ Không ghi/hiển thị API key, không theo redirect. Output chỉ từ fixture
 Đã chạy API thật qua daemon trên iPhone với 244 tin giả lập; xem [báo cáo tương tác](live-test-2026-10-30.md). Luồng chạy/compact/activate/chat và chống gửi trùng hoạt động, nhưng phát hiện mất mã dự án và lỗi truy xuất dữ kiện của model. Chưa chứng minh đầy đủ context 200K.
 
 0.11.1 chỉnh prompt, kiểm tra mã định danh literal của user messages được chọn và summary trước; thiếu mã thì candidate failed, giữ active cũ. Đây chỉ là guard cho dạng mã đơn giản, không đảm bảo toàn bộ thông tin/ngữ nghĩa. Đã lưu ca lỗi thật làm regression. Bản sửa đã build, chưa kiểm tra lại trên iPhone; auto-compact vẫn tắt.
+
+## 0.12.0 — memory có cấu trúc và trích dẫn nguồn
+
+Tham khảo hướng duy trì chi tiết/quyết định và trạng thái tác vụ của [Cline Auto Compact](https://github.com/cline/cline/blob/main/docs/features/auto-compact.mdx). Phần kiểm tra trích dẫn dưới đây là điều chỉnh riêng sau các ca thất bại trên provider thực của dự án này, không phải cam kết chất lượng của Cline.
+
+Model chỉ xuất JSON version 2 với tám mảng: goals, decisions, constraints, artifacts, facts, work_state, next_steps, permissions. Mỗi phần tử chỉ gồm source_id và quote nguyên văn. Daemon kiểm tra ID có thật và quote nằm trong nguồn. Với trạng thái công việc, ràng buộc và quyền, quote phải giữ toàn bộ content của tin nguồn để không bỏ mất phủ định/điều kiện. Không nhận trường verified/completed do model tự tạo. Tất cả dữ kiện được gắn `verification=not_independently_verified` và `provenance=history_only_untrusted`; đây là lời kể theo nguồn, không phải bằng chứng thực thi hay quyền runtime mới.
+
+Ngoài phần model chọn, daemon tự giữ `required_evidence`: nguyên văn user message có mã dạng LOTUS-482/T-42, đường dẫn tuyệt đối/URL, hoặc cụm chỉ trạng thái chưa làm/chưa kiểm chứng/chưa được phép (Anh/Việt). Đây là heuristic có phạm vi giới hạn, không phải bộ phân tích đầy đủ mọi dữ kiện. Với ca test trước, hai tin nguồn chứa mã dự án, đường dẫn báo cáo và NOT done được giữ ngay cả khi model bỏ qua. Dòng/tin có nhãn credential quen thuộc không được tự đưa vào evidence; có thể cần rút gọn nguồn khi compact. API key hiện tại được che trước khi dựng prompt/nguồn kiểm tra.
+
+Khi compact tiếp, evidence và các trích dẫn artifact/trạng thái/ràng buộc/quyền từ memory trước được mang sang theo ID, không bọc lại toàn bộ JSON cũ. Giữ các yêu cầu cũ và sửa đổi mới như dữ kiện có nguồn, chưa tự loại bỏ những yêu cầu đã bị thay thế. Nếu phần bắt buộc không vừa ngân sách hoặc không giảm context thì báo lỗi và giữ active cũ. Không âm thầm bỏ evidence để compact thành công. Sau khi model trả về, JSON không đúng schema, trích dẫn sai nguồn, có credential, vượt ngân sách hay chưa giảm context đều không chuyển ready. Hủy/restart/preview/activate/drop giữ cơ chế cũ.
+
+Storage vẫn dùng cột summary trong compactions; candidate mới có schema_version=2. Summary văn bản cũ đọc bình thường. Context native/web xem bản preview theo mục và source ID; request AI nhận JSON đầy đủ kèm chỉ dẫn không suy ra trạng thái đã kiểm chứng khi chưa có bằng chứng. Lịch sử gốc không bị sửa/xóa. Auto-compact vẫn tắt.
+
+Kiểm tra:
+
+- `tests/memory_test.cpp` chạy trực tiếp core dùng trong daemon: phát hiện evidence cho mã/path/URL/trạng thái phủ định, loại nhãn credential, khớp source ID/quote và không cắt phủ định khỏi trạng thái/quyền.
+- Các kiểm tra SQL/runtime/compact/ca lỗi thật và UI web tiếp tục chạy trên host.
+- `agenthomed --self-test-memory` là kiểm tra native bằng dữ liệu giả, chạy trước khi mở DB/socket, không gọi API. Kiểm tra JSON thật qua Foundation, quote sai nguồn, phủ định, evidence bắt buộc, carry-forward không lồng JSON, preview và ngân sách. Sau khi cài gói mới có thể chạy trên iPhone: `/var/jb/usr/bin/agenthomed --self-test-memory`.
+
+Bản native đã build; chưa chạy self-test native và ca 244 tin/API thật trên iPhone cho version 0.12.0. Không coi kiểm tra core/schema là bằng chứng chất lượng trả lời đã đạt 9/9. Cần chạy lại đối chứng sau khi cài, vì model vẫn có thể bỏ qua hoặc diễn giải sai dữ kiện dù nguồn đã được giữ.

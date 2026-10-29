@@ -3,6 +3,7 @@
 #import "AHModelLimits.h"
 #import "AHHistory.h"
 #import "AHCompactPlan.h"
+#import "AHMemory.h"
 #import "../app/AHContext.h"
 #import "../app/AHPrompt.h"
 #import "../app/AHProvider.h"
@@ -55,7 +56,10 @@ static NSString *encode(id value) { return [[NSString alloc] initWithData:[NSJSO
         NSDictionary *count=[self rows:@"SELECT count(*) AS n FROM messages WHERE conversation_id=? AND id>?" values:@[conversation,active[@"end_id"] ?: @"0"]].firstObject;
         NSUInteger total=(NSUInteger)MAX(0,[count[@"n"] longLongValue]);
         NSMutableDictionary *result=[limits mutableCopy]; [result addEntriesFromDictionary:plan]; [result removeObjectForKey:@"messages"];
-        result[@"active"]=active ?: @{}; result[@"latest"]=latest ?: @{}; result[@"usage"]=usage ?: @{};
+        NSMutableDictionary *activeView=[active mutableCopy] ?: [NSMutableDictionary dictionary], *latestView=[latest mutableCopy] ?: [NSMutableDictionary dictionary];
+        if(active) activeView[@"preview"]=AHMemoryPreview(active[@"summary"]);
+        if(latest) latestView[@"preview"]=AHMemoryPreview(latest[@"summary"]);
+        result[@"active"]=activeView; result[@"latest"]=latestView; result[@"usage"]=usage ?: @{};
         result[@"budget"]=@([limits[@"input_budget_tokens"] unsignedIntegerValue]*3);
         result[@"omitted_recent"]=@(total-MIN(total,[plan[@"recent_count"] unsignedIntegerValue]));
         result[@"estimate_method"]=@"UTF-8 JSON bytes / 3 + message overhead; approximate, not a tokenizer";
@@ -92,8 +96,9 @@ static NSString *encode(id value) { return [[NSString alloc] initWithData:[NSJSO
     NSDictionary *limits=AHModelLimits(profile);
     NSUInteger summaryBudget=MIN((NSUInteger)4096,MAX((NSUInteger)256,[limits[@"input_budget_tokens"] unsignedIntegerValue]/8));
     summaryBudget=MIN(summaryBudget,[limits[@"output_tokens"] unsignedIntegerValue]);
-    NSDictionary *plan=AHCompactPlan(self.db,conversation,active[@"end_id"] ?: @"0",active[@"summary"],[limits[@"input_budget_tokens"] unsignedIntegerValue],summaryBudget);
+    NSDictionary *plan=AHCompactPlan(self.db,conversation,active[@"end_id"] ?: @"0",active[@"summary"],[limits[@"input_budget_tokens"] unsignedIntegerValue],summaryBudget,key);
     if(!plan) { *error=@"Chưa có phần lịch sử hoàn tất vừa ngân sách compact. Giữ ít nhất 4 tin gần nhất; kiểm tra context window của provider."; return nil; }
+    if(!AHCompactSummaryValid(AHMemoryMinimum(plan[@"required_evidence"]),summaryBudget,[plan[@"before_tokens"] unsignedIntegerValue])) { *error=@"Dữ kiện nguồn bắt buộc vượt ngân sách memory hoặc chưa thể giảm context; giữ summary cũ."; return nil; }
     NSString *end=plan[@"end_id"], *hash=[self hashThrough:end conversation:conversation];
     NSUInteger before=[plan[@"before_chars"] unsignedIntegerValue];
     if(hash.length!=64) { *error=@"Cannot verify source history"; return nil; }
@@ -109,12 +114,12 @@ static NSString *encode(id value) { return [[NSString alloc] initWithData:[NSJSO
     self.job=job; self.key=key; self.provider=[AHProvider new]; self.provider.maxOutputTokens=summaryBudget;
     [self.provider sendTo:url model:profile[@"model"] key:key messages:messages tools:@[] streaming:NO delta:nil completion:^(NSDictionary *message,NSError *failure){
         if(![self.job isEqual:job]) return;
-        NSString *summary=message[@"content"]; BOOL valid=!failure && [summary isKindOfClass:NSString.class] && AHCompactSummaryValid(summary,summaryBudget,[plan[@"before_tokens"] unsignedIntegerValue]) && (!message[@"tool_calls"] || ([message[@"tool_calls"] isKindOfClass:NSArray.class] && ![message[@"tool_calls"] count]));
-        if(valid) { summary=[summary stringByReplacingOccurrencesOfString:self.key withString:@"[API KEY REDACTED]"]; valid=AHCompactSummaryValid(summary,summaryBudget,[plan[@"before_tokens"] unsignedIntegerValue]); }
-        NSArray *missing=valid?AHCompactMissingIdentifiers(summary,plan[@"required_identifiers"]):@[];
-        if(missing.count) valid=NO;
-        if(valid) { [self sql:@"UPDATE compactions SET state='ready',summary=?,after_chars=? WHERE id=? AND state='running'" values:@[summary,@(summary.length),job]]; }
-        else [self sql:@"UPDATE compactions SET state='failed',error=? WHERE id=? AND state='running'" values:@[failure.localizedDescription ?: (missing.count?@"Summary thiếu mã định danh trong nguồn; giữ summary cũ. Hãy thử compact lại hoặc đổi model.":@"Summary không hợp lệ, quá dài hoặc chưa giảm context"),job]];
+        NSString *validationError=nil;
+        NSString *summary=!failure?AHMemoryCanonical(message[@"content"],plan[@"sources"],plan[@"required_evidence"],&validationError):nil;
+        BOOL valid=!failure && summary && AHCompactSummaryValid(summary,summaryBudget,[plan[@"before_tokens"] unsignedIntegerValue]) && (!message[@"tool_calls"] || ([message[@"tool_calls"] isKindOfClass:NSArray.class] && ![message[@"tool_calls"] count]));
+        if(valid && self.key.length && [summary containsString:self.key]) { valid=NO; validationError=@"Memory chứa API key; giữ summary cũ."; }
+        if(valid) { [self sql:@"UPDATE compactions SET state='ready',summary=?,after_chars=?,schema_version=2 WHERE id=? AND state='running'" values:@[summary,@(summary.length),job]]; }
+        else [self sql:@"UPDATE compactions SET state='failed',error=? WHERE id=? AND state='running'" values:@[failure.localizedDescription ?: validationError ?: @"Memory vượt ngân sách hoặc chưa giảm context; giữ summary cũ.",job]];
         self.job=nil; self.key=nil; self.provider=nil; [self.lease end]; self.lease=nil;
     }];
     return @{@"id":job};
