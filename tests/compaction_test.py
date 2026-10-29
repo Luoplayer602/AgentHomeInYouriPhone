@@ -47,3 +47,14 @@ db.execute(sql("UPDATE compactions SET state='discarded' WHERE conversation_id="
 assert db.execute("SELECT state FROM compactions WHERE id='other'").fetchone()[0]=='active'
 assert db.execute('SELECT * FROM messages').fetchall()==original
 print('PASS compact SQL: source history unchanged, active snapshot isolation, ready/apply/drop, restart preserves old summary, rollback, retained message boundary')
+planner=Path('daemon/AHCompactPlan.m').read_text()
+boundary_query=re.search(r'"(SELECT id FROM messages WHERE conversation_id=\? AND id>\? ORDER BY id DESC LIMIT 1 OFFSET 4)"',planner).group(1)
+source_query=re.search(r'"(SELECT id,role,content FROM messages WHERE conversation_id=\? AND id>\? AND id<=\? ORDER BY id)"',planner).group(1)
+for i in range(300): db.execute('INSERT INTO messages(conversation_id,role,content) VALUES (?,?,?)',('long','user' if i%2==0 else 'assistant','x'*1000))
+boundary=db.execute(boundary_query,('long',0)).fetchone()[0]
+rows=db.execute(source_query,('long',0,boundary)).fetchall()
+assert len(rows)==296 and rows[-1][1]=='assistant'
+assert db.execute('SELECT count(*) FROM messages WHERE conversation_id=? AND id>?',('long',boundary)).fetchone()[0]==4
+assert not db.execute(boundary_query,('long',boundary)).fetchall()
+assert len(db.execute(source_query,('a',6,8)).fetchall())==2
+print('PASS compact planner SQL: contiguous prefix, >200 messages, retain four newest, active-summary boundary')
