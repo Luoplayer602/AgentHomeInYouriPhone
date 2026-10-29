@@ -17,6 +17,32 @@ static id execute(NSString *method, NSDictionary *params, NSString **error) {
             @"free_bytes": @((unsigned long long)fs.f_bavail * fs.f_frsize),
             @"total_bytes": @((unsigned long long)fs.f_blocks * fs.f_frsize), @"uid": @(getuid())};
     }
+    if ([method isEqual:@"task.create"]) {
+        NSString *conversation=params[@"conversation_id"], *tool=params[@"tool"];
+        if(![conversation isKindOfClass:NSString.class] || !conversation.length || conversation.length>80 || ![tool isEqual:@"system.info"]) { *error=@"Task capability denied: only system.info is allowed"; return nil; }
+        NSString *identifier=NSUUID.UUID.UUIDString;
+        if(AHTaskCreate(db,identifier.UTF8String,conversation.UTF8String)!=SQLITE_OK) { *error=@"Cannot save task"; return nil; }
+        return @{@"id":identifier,@"state":@"queued",@"risk":@0};
+    }
+    if ([method isEqual:@"task.list"]) {
+        NSString *conversation=params[@"conversation_id"];
+        if(![conversation isKindOfClass:NSString.class]) { *error=@"Invalid conversation"; return nil; }
+        sqlite3_stmt *s=NULL;
+        if(sqlite3_prepare_v2(db,"SELECT id,state,result,created_at FROM tasks WHERE conversation_id=? ORDER BY rowid DESC LIMIT 50",-1,&s,NULL)!=SQLITE_OK) { *error=@"Task read failed"; return nil; }
+        sqlite3_bind_text(s,1,conversation.UTF8String,-1,SQLITE_TRANSIENT);
+        NSMutableArray *items=[NSMutableArray array];
+        while(sqlite3_step(s)==SQLITE_ROW) [items addObject:@{@"id":@((const char *)sqlite3_column_text(s,0)),@"state":@((const char *)sqlite3_column_text(s,1)),@"result":@((const char *)sqlite3_column_text(s,2)),@"created_at":@((const char *)sqlite3_column_text(s,3))}];
+        sqlite3_finalize(s); return @{@"tasks":items};
+    }
+    if ([method isEqual:@"task.events"]) {
+        NSString *identifier=params[@"id"];
+        if(![identifier isKindOfClass:NSString.class]) { *error=@"Invalid task ID"; return nil; }
+        sqlite3_stmt *s=NULL;
+        if(sqlite3_prepare_v2(db,"SELECT state,note,created_at FROM task_events WHERE task_id=? ORDER BY id LIMIT 100",-1,&s,NULL)!=SQLITE_OK) { *error=@"Event read failed"; return nil; }
+        sqlite3_bind_text(s,1,identifier.UTF8String,-1,SQLITE_TRANSIENT); NSMutableArray *events=[NSMutableArray array];
+        while(sqlite3_step(s)==SQLITE_ROW) [events addObject:@{@"state":@((const char *)sqlite3_column_text(s,0)),@"note":@((const char *)sqlite3_column_text(s,1)),@"at":@((const char *)sqlite3_column_text(s,2))}];
+        sqlite3_finalize(s); return @{@"events":events};
+    }
     if ([method isEqual:@"chat.conversations"]) {
         sqlite3_stmt *s = NULL;
         if (sqlite3_prepare_v2(db, AHConversationsSQL, -1, &s, NULL) != SQLITE_OK) { *error = @"Database read failed"; return nil; }
@@ -76,7 +102,9 @@ static id execute(NSString *method, NSDictionary *params, NSString **error) {
                 bytes += size; [items addObject:item];
             }
             sqlite3_finalize(s);
-            return @{@"messages":[[items reverseObjectEnumerator] allObjects]};
+            NSUInteger total=items.count; s=NULL;
+            if(sqlite3_prepare_v2(db,"SELECT count(*) FROM messages WHERE conversation_id=?",-1,&s,NULL)==SQLITE_OK) { sqlite3_bind_text(s,1,identifier.UTF8String,-1,SQLITE_TRANSIENT); if(sqlite3_step(s)==SQLITE_ROW) total=sqlite3_column_int64(s,0); } sqlite3_finalize(s);
+            return @{@"messages":[[items reverseObjectEnumerator] allObjects],@"total_messages":@(total)};
         }
         NSString *role = params[@"role"], *content = params[@"content"];
         if (![@[@"user",@"assistant"] containsObject:role] || ![content isKindOfClass:NSString.class] || !content.length || content.length > 32000) { *error = @"Invalid message"; return nil; }
@@ -128,16 +156,31 @@ static void serve(int fd) {
     const char *p = out.bytes; NSUInteger remaining = out.length;
     while (remaining) { ssize_t n = write(fd, p, remaining); if (n <= 0) break; p += n; remaining -= n; }
 }
+static void runQueuedTasks(void) {
+    for(;;) { @autoreleasepool {
+        sqlite3_stmt *s=NULL;
+        if(sqlite3_prepare_v2(db,"SELECT id FROM tasks WHERE state='queued' ORDER BY rowid LIMIT 1",-1,&s,NULL)!=SQLITE_OK) return;
+        NSString *identifier=nil;
+        if(sqlite3_step(s)==SQLITE_ROW) identifier=@((const char *)sqlite3_column_text(s,0));
+        sqlite3_finalize(s); if(!identifier) return;
+        if(AHTaskTransition(db,identifier.UTF8String,"queued","running","","Executing read-only capability")!=SQLITE_OK) return;
+        NSString *error=nil; id info=execute(@"system.info",@{},&error);
+        NSString *result=info?[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:info options:0 error:nil] encoding:NSUTF8StringEncoding]:error;
+        if(AHTaskTransition(db,identifier.UTF8String,"running",info?"completed":"failed",result.UTF8String,info?"Result persisted":"Capability failed")!=SQLITE_OK) return;
+    } }
+}
 int main(void) { @autoreleasepool {
     signal(SIGPIPE, SIG_IGN); umask(0077);
     NSError *error = nil;
     if (![NSFileManager.defaultManager createDirectoryAtPath:AHDataPath withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0700} error:&error]) return 1;
     if (sqlite3_open([AHDataPath stringByAppendingPathComponent:@"memory.sqlite"].UTF8String, &db) != SQLITE_OK) return 2;
     if (AHMigrate(db) != SQLITE_OK) return 3;
+    if(AHTaskRecover(db)!=SQLITE_OK) return 6;
+    runQueuedTasks();
     int listener = socket(AF_UNIX, SOCK_STREAM, 0);
     struct sockaddr_un address = {0}; address.sun_family = AF_UNIX;
     strlcpy(address.sun_path, AHSocketPath, sizeof(address.sun_path));
     unlink(AHSocketPath);
     if (bind(listener, (struct sockaddr *)&address, sizeof(address)) || chmod(AHSocketPath, 0600) || listen(listener, 8)) return 4;
-    for (;;) { int fd = accept(listener, NULL, NULL); if (fd < 0) { if (errno == EINTR) continue; return 5; } @autoreleasepool { serve(fd); } close(fd); }
+    for (;;) { int fd = accept(listener, NULL, NULL); if (fd < 0) { if (errno == EINTR) continue; return 5; } @autoreleasepool { serve(fd); } close(fd); runQueuedTasks(); }
 } }

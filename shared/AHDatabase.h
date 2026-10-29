@@ -1,5 +1,6 @@
 #pragma once
 #include <sqlite3.h>
+#include "AHTasks.h"
 // Shared by daemon and host migration tests. Existing history stays in legacy.
 static const char *AHMessagesSQL = "SELECT role,content FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 100";
 static const char *AHConversationsSQL = "SELECT id,title,pinned,accessed_at FROM conversations ORDER BY pinned DESC,accessed_at DESC,rowid DESC LIMIT 200";
@@ -27,7 +28,8 @@ static inline int AHMigrate(sqlite3 *db) {
     if (rc == SQLITE_OK) rc = AHAddColumn(db,"pinned","ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
     if (rc == SQLITE_OK) rc = AHAddColumn(db,"accessed_at","ALTER TABLE conversations ADD COLUMN accessed_at REAL NOT NULL DEFAULT 0");
     if (rc == SQLITE_OK) rc = sqlite3_exec(db,"UPDATE conversations SET accessed_at=updated_at WHERE accessed_at=0",0,0,0);
-    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id); PRAGMA user_version=2; COMMIT", 0, 0, 0);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db,AHTaskSchema,0,0,0);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id); PRAGMA user_version=3; COMMIT", 0, 0, 0);
     if (rc != SQLITE_OK) sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
     sqlite3_exec(db, "PRAGMA foreign_keys=ON", 0, 0, 0);
     return rc;

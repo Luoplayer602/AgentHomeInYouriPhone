@@ -1,6 +1,6 @@
 include $(THEOS)/makefiles/common.mk
 APPLICATION_NAME = AgentHome
-AgentHome_FILES = main.m AHClient.m AHApp.m AHProviderConfig.m AHProvider.mm AHProfiles.m AHMarkdown.m AHInput.m AHSettings.m AHChatContent.mm AHDisplay.m
+AgentHome_FILES = main.m AHClient.m AHApp.m AHProviderConfig.m AHProvider.mm AHProfiles.m AHMarkdown.m AHInput.m AHSettings.m AHChatContent.mm AHDisplay.m AHContext.m AHTaskList.m
 AgentHome_CCFLAGS = -std=c++17
 AgentHome_CFLAGS = -fobjc-arc -Wall -Wextra
 AgentHome_FRAMEWORKS = UIKit Foundation Security OpenGLES CoreImage

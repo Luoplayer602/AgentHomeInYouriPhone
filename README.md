@@ -1,6 +1,15 @@
-# Agent Home — nền tảng v0.5.2
+# Agent Home — nền tảng v0.6.0
 
 App iOS và daemon độc lập dành cho iPhone jailbreak rootless. Đích hiện tại: iPhone 6s, iOS 15, Dopamine; build bằng Theos trong WSL2.
+
+## Bản 0.6.0 — hàng đợi tác vụ và context
+
+- Preset chữ thêm **12 pt**, giữ nguyên số pt đang chọn từ bản cũ.
+- Nút **Tác vụ** trong thanh dưới hội thoại → **Kiểm tra** tạo task `system.info` trong daemon. Task ID, trạng thái queued/running/completed/failed và nhật ký từng bước lưu SQLite. Mở lại app vẫn xem kết quả. Khi daemon khởi động lại, task read-only đang running được đưa lại queued; không tự chạy lại hành động có tác dụng phụ.
+- Chỉ cho phép tool đọc trạng thái mức rủi ro 0. Chat model/API và vòng gọi tool AI **vẫn chạy trong app**, chưa được chuyển sang daemon; task mới là phần nền độc lập đầu tiên. Chưa có scheduler hay thực thi shell.
+- **◉ %** hiển thị phần ngân sách 16.000 ký tự tin nhắn được dùng cho lần gửi tiếp. Nhấn xem số tin được đưa vào/ngoài lượt gửi. Đây không phải token hoặc giới hạn context thật của model, chưa tính system prompt và tool schemas. Lịch sử gốc giữ trong SQLite. Thiết kế compact ở [docs/context-compaction.md](docs/context-compaction.md).
+
+Sau khi cài phải restart daemon. Kiểm tra: tạo task, đóng app, mở lại Tác vụ để đọc kết quả/nhật ký. Task đọc nhanh có thể xong trước khi đóng app. Kiểm thử host bao gồm mở lại file SQLite và phục hồi task đang running. Chưa kiểm chứng tự động trên iPhone mới nâng cấp.
 
 ## Bản 0.5.1
 
@@ -74,14 +83,14 @@ Cần SDK iPhoneOS15.6 và toolchain arm64 trong Theos. Nếu Theos ở vị tr�
 Thay `PHONE_IP` bằng IP máy. Thiết bị cần đang jailbreak, đã cài OpenSSH. Chép gói mới nhất bằng tên thực tế ở `packages/`:
 
 ```bash
-scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.5.1_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
+scp -O -i ~/.ssh/ulp_iphone packages/dev.agenthome.iphone_0.6.0_iphoneos-arm64.deb mobile@PHONE_IP:/var/mobile/
 ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP
 ```
 
 Trong shell iPhone, dùng quyền quản trị để cài gói (ví dụ `sudo`, nếu đã cấu hình):
 
 ```bash
-sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.5.1_iphoneos-arm64.deb
+sudo dpkg -i /var/mobile/dev.agenthome.iphone_0.6.0_iphoneos-arm64.deb
 sudo launchctl bootstrap system /var/jb/Library/LaunchDaemons/dev.agenthome.daemon.plist
 sudo launchctl kickstart -k system/dev.agenthome.daemon
 sudo uicache -p /var/jb/Applications/AgentHome.app

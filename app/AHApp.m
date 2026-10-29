@@ -9,6 +9,8 @@
 #import "AHSettings.h"
 #import "AHChatContent.h"
 #import "AHDisplay.h"
+#import "AHContext.h"
+#import "AHTaskList.h"
 @interface AHChatCell : UITableViewCell
 @property (nonatomic, strong) UIView *bubble;
 @property (nonatomic, strong) AHChatContent *messageLabel;
@@ -72,6 +74,8 @@
 @property UIButton *sendButton;
 @property NSMutableArray *messages;
 @property BOOL busy;
+@property (nonatomic,strong) UIButton *contextButton;
+@property NSUInteger historyCount;
 @property (nonatomic, copy) NSString *conversationID;
 @end
 @implementation AHController
@@ -101,14 +105,19 @@
     row.translatesAutoresizingMaskIntoConstraints = NO;
     [composer.contentView addSubview:row];
     [NSLayoutConstraint activateConstraints:@[[row.topAnchor constraintEqualToAnchor:composer.contentView.topAnchor constant:8], [row.bottomAnchor constraintEqualToAnchor:composer.contentView.bottomAnchor constant:-8], [row.leadingAnchor constraintEqualToAnchor:composer.contentView.leadingAnchor constant:8], [row.trailingAnchor constraintEqualToAnchor:composer.contentView.trailingAnchor constant:-8]]];
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[self.chat,self.statusLabel,composer]]; stack.axis = UILayoutConstraintAxisVertical; stack.spacing = 10; stack.translatesAutoresizingMaskIntoConstraints = NO;
+    self.contextButton=[UIButton buttonWithType:UIButtonTypeSystem]; self.contextButton.titleLabel.font=[UIFont systemFontOfSize:12]; self.contextButton.accessibilityLabel=@"Mức sử dụng context";
+    [self.contextButton addTarget:self action:@selector(contextInfo) forControlEvents:UIControlEventTouchUpInside];
+    UIButton *tasks=[UIButton buttonWithType:UIButtonTypeSystem]; [tasks setTitle:@"Tác vụ" forState:UIControlStateNormal]; tasks.titleLabel.font=[UIFont systemFontOfSize:12]; [tasks addTarget:self action:@selector(tasks) forControlEvents:UIControlEventTouchUpInside];
+    [self.contextButton setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal]; [tasks setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    UIStackView *info=[[UIStackView alloc] initWithArrangedSubviews:@[self.statusLabel,self.contextButton,tasks]]; info.spacing=10; self.statusLabel.numberOfLines=1; [self.statusLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[self.chat,info,composer]]; stack.axis = UILayoutConstraintAxisVertical; stack.spacing = 10; stack.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[[stack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8], [stack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12], [stack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12], [stack.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor constant:-8], [row.heightAnchor constraintEqualToConstant:44], [self.sendButton.widthAnchor constraintEqualToConstant:48]]];
     [self setWorking:YES];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
         NSError *error = nil; [AHClient call:@"chat.touch" params:@{@"conversation_id":self.conversationID} error:nil];
         NSDictionary *result = [AHClient call:@"chat.list" params:@{@"conversation_id":self.conversationID} error:&error];
-        dispatch_async(dispatch_get_main_queue(), ^{ [self setWorking:NO]; if (result) { [self.messages addObjectsFromArray:result[@"messages"]]; [self render]; } else [self show:error.localizedDescription]; });
+        dispatch_async(dispatch_get_main_queue(), ^{ [self setWorking:NO]; if (result) { [self.messages addObjectsFromArray:result[@"messages"]]; self.historyCount=[result[@"total_messages"] unsignedIntegerValue]; [self render]; } else [self show:error.localizedDescription]; });
     });
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -118,6 +127,7 @@
     if(!self.busy) self.statusLabel.text=[NSString stringWithFormat:@"%@ · %@",AHActiveProfile()[@"name"],AHActiveProfile()[@"model"]];
 }
 - (void)show:(NSString *)message {
+    if(self.presentedViewController || !self.view.window) { self.statusLabel.text=message; return; }
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Agent Home" message:message preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; [self presentViewController:a animated:YES completion:nil];
 }
@@ -131,9 +141,22 @@
     return cell;
 }
 - (void)render {
+    NSDictionary *context=AHContextSnapshot(self.messages,self.historyCount);
+    double percent=[context[@"characters"] doubleValue]*100/AHContextBudget;
+    [self.contextButton setTitle:[NSString stringWithFormat:@"◉ %.0f%%",percent] forState:UIControlStateNormal];
+    self.contextButton.tintColor=percent>=90?UIColor.systemOrangeColor:UIColor.systemBlueColor;
     [self.chat reloadData];
     NSInteger rows = self.messages.count + (self.draft.length ? 1 : 0);
     if (rows) [self.chat scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:rows-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
+}
+- (void)contextInfo {
+    NSDictionary *context=AHContextSnapshot(self.messages,self.historyCount);
+    [self show:[NSString stringWithFormat:@"Context gửi lần tới: %@ / %@ ký tự tin nhắn\n%lu tin được đưa vào · %@ tin cũ ngoài lượt gửi\n\nĐây là ngân sách đầu vào của app, KHÔNG phải số token hay giới hạn context thật của model. Chưa tính system prompt và tool schema. Lịch sử đầy đủ vẫn ở SQLite.\n\nCompact bằng bản tóm tắt có checkpoint sẽ được triển khai tiếp; hiện app chưa tự tóm tắt.",context[@"characters"],context[@"budget"],(unsigned long)[context[@"messages"] count],context[@"omitted"]]];
+}
+- (void)tasks {
+    if(self.presentedViewController) return;
+    AHTaskList *list=[AHTaskList new]; list.conversationID=self.conversationID;
+    [self presentViewController:[[UINavigationController alloc] initWithRootViewController:list] animated:YES completion:nil];
 }
 - (void)settings {
     if (self.busy || self.presentedViewController) return;
@@ -186,14 +209,11 @@
             if (self.runID != run) return;
             if (error) { self.running = NO; [self setWorking:NO]; [self show:error.localizedDescription]; return; }
             self.running = YES; [self setWorking:YES];
-            [self.messages addObject:message]; self.input.text = @""; [self render];
+            self.historyCount++; [self.messages addObject:message]; self.input.text = @""; [self render];
             NSString *system = [NSString stringWithFormat:@"Bạn là trợ lý Agent Home. Model ID đang cấu hình là %@; đây là ID do provider cung cấp, không xác minh danh tính mô hình phía sau. Chỉ có công cụ system_info đọc dung lượng và phiên bản hệ điều hành. Không khẳng định đã thực hiện hành động nếu chưa có kết quả công cụ.", model];
             NSMutableArray *context = [NSMutableArray arrayWithObject:@{@"role":@"system", @"content":system}];
             // Keep outbound context bounded on the 2 GB device.
-            NSUInteger count = 0;
-            NSMutableArray *recent = [NSMutableArray array];
-            for (NSDictionary *m in self.messages.reverseObjectEnumerator) { NSUInteger size = [m[@"content"] length]; if (count + size > 16000) break; [recent insertObject:m atIndex:0]; count += size; }
-            [context addObjectsFromArray:recent];
+            [context addObjectsFromArray:AHContextSnapshot(self.messages,self.historyCount)[@"messages"]];
             [self request:context endpoint:endpoint model:model key:key round:0];
         });
     });
@@ -275,7 +295,7 @@
     self.draft = [NSMutableString string];
     if (!text.length) { [self setWorking:NO]; [self render]; if (error) { self.statusLabel.text = @"Yêu cầu thất bại."; [self show:error.localizedDescription]; } return; }
     NSDictionary *item = @{@"role":@"assistant", @"content":text};
-    [self.messages addObject:item]; [self render];
+    self.historyCount++; [self.messages addObject:item]; [self render];
     self.sendButton.enabled = NO;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
         NSError *saveError = nil; [AHClient call:@"chat.append" params:@{@"role":item[@"role"],@"content":item[@"content"],@"conversation_id":self.conversationID} error:&saveError];
