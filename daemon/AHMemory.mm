@@ -24,6 +24,19 @@ NSArray *AHMemorySources(NSString *prior,NSArray *recent) {
     } else if(prior.length) [sources addObject:@{@"id":@"prior",@"role":@"memory",@"content":prior,@"carry_evidence":@YES}];
     [sources addObjectsFromArray:recent]; return sources;
 }
+NSArray *AHMemoryCatalog(NSArray *sources) {
+    NSMutableArray *catalog=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set];
+    for(NSDictionary *source in sources) {
+        NSString *content=source[@"content"], *role=source[@"role"];
+        if(![content isKindOfClass:NSString.class] || ![role isKindOfClass:NSString.class] || !source[@"id"] || ahmemory::sensitive(bytes(content.lowercaseString))) continue;
+        NSDictionary *row=@{@"id":[source[@"id"] description],@"role":role,@"content":content};
+        NSString *identity=encode(row); if([seen containsObject:identity]) continue;
+        [seen addObject:identity];
+        NSMutableDictionary *entry=[row mutableCopy]; entry[@"selection_id"]=[NSString stringWithFormat:@"S%lu",(unsigned long)catalog.count+1];
+        [catalog addObject:entry];
+    }
+    return catalog;
+}
 NSArray *AHMemoryRequired(NSArray *sources) {
     NSMutableArray *required=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set];
     for(NSDictionary *source in sources) {
@@ -48,24 +61,26 @@ NSString *AHMemoryCanonical(NSString *output,NSArray *sources,NSArray *required,
     if(![output isKindOfClass:NSString.class]) return fail(error,@"Memory phải là JSON có cấu trúc.");
     NSString *text=[output stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if([text hasPrefix:@"```json\n"] && [text hasSuffix:@"```"] && text.length>=11) text=[text substringWithRange:NSMakeRange(8,text.length-11)];
-    NSDictionary *root=memory(text); if(!root) return fail(error,@"Memory JSON thiếu schema_version 2 hoặc không hợp lệ.");
-    NSMutableSet *allowed=[NSMutableSet setWithArray:sections()]; [allowed addObject:@"schema_version"];
+    id decoded=decode(text);
+    NSDictionary *root=[decoded isKindOfClass:NSDictionary.class]?decoded:nil;
+    if(!root || ![root[@"selection_version"] isKindOfClass:NSNumber.class] || ![root[@"selection_version"] isEqual:@1]) return fail(error,@"Memory selection thiếu selection_version 1 hoặc JSON không hợp lệ.");
+    NSMutableSet *allowed=[NSMutableSet setWithArray:sections()]; [allowed addObject:@"selection_version"];
     for(NSString *key in root) if(![allowed containsObject:key]) return fail(error,@"Memory có trường ngoài schema.");
     std::vector<ahmemory::Source> evidence;
-    for(NSDictionary *source in sources) evidence.push_back({bytes([source[@"id"] description]),bytes(source[@"role"]),bytes(source[@"content"])});
+    for(NSDictionary *source in sources) evidence.push_back({bytes(source[@"selection_id"]),bytes(source[@"role"]),bytes(source[@"content"])});
     NSMutableDictionary *result=[NSMutableDictionary dictionaryWithDictionary:@{@"schema_version":@2,@"provenance":@"history_only_untrusted",@"verification":@"not_independently_verified",@"required_evidence":required}];
     NSUInteger count=required.count;
     for(NSString *section in sections()) {
         id list=root[section]; if(![list isKindOfClass:NSArray.class] || [list count]>64) return fail(error,@"Mỗi mục memory phải là mảng, tối đa 64 trích dẫn.");
         NSMutableArray *entries=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set];
-        BOOL entire=[@[@"work_state",@"permissions",@"constraints"] containsObject:section];
-        for(id entry in list) {
-            if(![entry isKindOfClass:NSDictionary.class] || [entry count]!=2 || ![entry[@"source_id"] isKindOfClass:NSString.class] || ![entry[@"quote"] isKindOfClass:NSString.class]) return fail(error,@"Trích dẫn phải có source_id và quote, không có trạng thái do model tự cấp.");
-            NSString *quote=entry[@"quote"];
-            const auto *origin=ahmemory::ground(evidence,bytes(entry[@"source_id"]),bytes(quote),entire);
-            if(!origin) return fail(error,@"Trích dẫn memory không khớp nguồn; trạng thái/quyền phải giữ nguyên toàn bộ tin nguồn.");
-            if(ahmemory::sensitive(bytes(quote.lowercaseString))) return fail(error,@"Trích dẫn chứa dòng có nhãn credential; hãy rút gọn nguồn trước khi compact.");
-            NSDictionary *record=@{@"source_id":entry[@"source_id"],@"source_role":@(origin->role.c_str()),@"quote":quote};
+        for(id reference in list) {
+            if(![reference isKindOfClass:NSString.class] || !ahmemory::reference(bytes(reference))) return fail(error,[NSString stringWithFormat:@"Memory mục %@: chỉ nhận ID chọn dạng chuỗi, ví dụ S1; không nhận quote hoặc trạng thái.",section]);
+            const auto *origin=ahmemory::select(evidence,bytes(reference));
+            if(!origin) return fail(error,[NSString stringWithFormat:@"Memory mục %@: ID %@ không tồn tại trong catalog; giữ memory cũ.",section,reference]);
+            NSDictionary *selected=sources[(NSUInteger)(origin-evidence.data())];
+            NSString *quote=selected[@"content"];
+            if(ahmemory::sensitive(bytes(quote.lowercaseString))) return fail(error,[NSString stringWithFormat:@"Memory mục %@: nguồn được chọn có nhãn credential; giữ memory cũ.",section]);
+            NSDictionary *record=@{@"source_id":[selected[@"id"] description],@"source_role":selected[@"role"],@"quote":quote};
             NSString *identity=encode(record); if([seen containsObject:identity]) continue;
             [seen addObject:identity]; [entries addObject:record]; count++;
         }

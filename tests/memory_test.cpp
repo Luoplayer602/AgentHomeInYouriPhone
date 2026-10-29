@@ -14,13 +14,15 @@ int main() {
     assert(!required("Read-only diagnostic completed", "read-only diagnostic completed"));
     assert(!required("Secret ABC-123 /private/key", "secret abc-123 /private/key"));
     const std::string pending="Build and iPhone verification are NOT done. Only read is authorized.";
-    std::vector<Source> sources={{"1","user","Project LOTUS-482, report /tmp/report.txt"},{"231","user",pending}};
-    assert(ground(sources,"1","LOTUS-482",false));
-    assert(!ground(sources,"1","NEW-999",false));
-    assert(!ground(sources,"2","LOTUS-482",false));
-    assert(!ground(sources,"231","done",true)); // Cannot strip NOT or permission conditions.
-    assert(ground(sources,"231",pending,true));
-    assert(!ground(sources,"231","",true));
-    assert(!ground(sources,"1",std::string("LOTUS-482\0invented",18),false));
-    puts("PASS grounded memory: project/path/negative-state evidence, credential exclusion, source IDs, no invented quotes, preserves entire status/permission source");
+    std::vector<Source> sources={{"S1","user","Project LOTUS-482, report /tmp/report.txt"},{"S2","user",pending}};
+    assert(select(sources,"S1"));
+    const auto *chosen=select(sources,"S2");
+    assert(chosen && chosen->text==pending && chosen->role=="user");
+    assert(!select(sources,"S999"));
+    assert(!select(sources,"231"));
+    assert(!reference("S01") && !reference("S0") && !reference("S1 quote"));
+    assert(reference("S240"));
+    assert(!select(sources,"done"));
+    assert(!select(sources,std::string("S1\0invented",11)));
+    puts("PASS memory selection: mandatory evidence, credential labels, exact catalog lookup, entire status/permission content, rejects unknown/raw/binary IDs");
 }

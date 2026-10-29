@@ -17,9 +17,14 @@ inline bool required(const std::string &text,const std::string &lower) {
     for(const auto *term:{"not done","not verified","not authorized","not authorised","unverified","chưa kiểm","chưa xác","chưa hoàn","chưa chạy","chưa cho phép","không được phép","không deploy"}) if(lower.find(term)!=std::string::npos) return true;
     return false;
 }
-inline const Source *ground(const std::vector<Source> &sources,const std::string &id,const std::string &quote,bool entire) {
-    if(quote.empty()) return nullptr;
-    for(const auto &source:sources) if(source.id==id && (entire?source.text==quote:source.text.find(quote)!=std::string::npos)) return &source;
+inline bool reference(const std::string &id) {
+    if(id.size()<2 || id.size()>8 || id[0]!='S' || id[1]<'1' || id[1]>'9') return false;
+    for(size_t i=2;i<id.size();i++) if(id[i]<'0' || id[i]>'9') return false;
+    return true;
+}
+inline const Source *select(const std::vector<Source> &sources,const std::string &id) {
+    if(!reference(id)) return nullptr;
+    for(const auto &source:sources) if(source.id==id) return &source;
     return nullptr;
 }
 }

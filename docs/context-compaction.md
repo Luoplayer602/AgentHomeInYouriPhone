@@ -97,3 +97,19 @@ Bản native đã build; chưa chạy self-test native và ca 244 tin/API thật
 ### Kết quả kiểm tra thiết bị 0.12.0
 
 Self-test native trên iPhone đã **PASS**. Tuy nhiên cả ca gốc 244 tin lẫn ca trạng thái ngắn/dữ liệu sạch đều chưa tạo được candidate ready trên provider hiện tại vì output bị validator từ chối. Chưa chạy recall sau compact cho bản này. Chi tiết và giới hạn phép thử ở [báo cáo test thiết bị](live-test-2026-10-30.md); bằng chứng tại `tests/fixtures/memory-v012-live.json`. Kế hoạch tiếp: model chọn source ID, daemon dựng trích dẫn; giữ nguyên kiểm tra nguồn và không bật auto-compact.
+
+## 0.13.0 — model chọn nguồn, daemon dựng memory
+
+Thay giao thức output model bằng `selection_version:1`; tám mục vẫn giữ tên nhưng mỗi mục chỉ là mảng các ID như `S1`, `S2`. Daemon tạo catalog trong từng request, mỗi bản ghi có selection_id, ID gốc, role và content. Các bản ghi giống nhau được gộp; các đoạn khác nhau cùng ID gốc vẫn có selection_id riêng. Input không còn yêu cầu model đọc JSON memory cũ rồi chép lại quote: memory cũ được bung thành các nguồn có thể chọn.
+
+Model chỉ chọn ID và mục. Daemon kiểm tra ID, tra catalog và tự lấy **toàn bộ content nguyên văn** cùng ID gốc/role. Không nhận quote, đoạn diễn giải hay cờ verified/completed từ model. ID không tồn tại, số thay chuỗi, object thay ID, trường ngoài schema hoặc JSON sai đều bị từ chối. Lỗi chỉ ghi mục và ID hợp lệ về cú pháp, không in nội dung hội thoại. ID chọn chỉ có hiệu lực trong request hiện tại, không dùng làm ID nguồn lưu lâu dài.
+
+Các nguồn có nhãn credential theo heuristic hiện tại bị loại khỏi catalog; dữ liệu gốc trong transcript vẫn giữ. Vì vậy model không thể chọn lại các dòng đó vào memory bằng ID. Heuristic này có thể loại cả tin trộn credential với dữ kiện khác; không được xem là bảo đảm giữ mọi dữ kiện hay phát hiện mọi bí mật. API key hiện tại vẫn được che trước khi dựng nguồn. Nguồn web/tool/assistant vẫn là dữ liệu không đáng tin, không cấp quyền.
+
+Định dạng memory lưu trong SQLite vẫn schema_version=2, có provenance/verification và required_evidence như 0.12.0. Evidence bắt buộc, carry-forward, preview, giới hạn token, yêu cầu giảm context, giữ bốn tin mới nhất và duyệt/activate thủ công không thay đổi. Phần model chọn quá nhiều nguồn có thể làm memory vượt ngân sách: báo lỗi giữ active cũ, không tự bỏ bớt nội dung hay tự retry vô hạn.
+
+Cập nhật `--self-test-memory` kiểm tra chọn ID → sao chép toàn nguồn, ID gốc không bị nhầm thành ID chọn, source ID trùng nhưng excerpt khác, gộp chọn trùng, loại nguồn gắn nhãn credential, từ chối quote/object/số/ID lạ/trường tự cấp trạng thái, carry-forward, preview và ngân sách. Core selector có kiểm tra ID ASCII và giữ nguyên byte, không cắt tại NUL.
+
+Công cụ host `scripts/evaluate-compaction.py --run` gửi catalog fixture theo giao thức mới, tra ID để chấm các nguồn được model chọn; công cụ này **không chạy** cơ chế evidence bắt buộc/budget/schema native. Kết quả host là kiểm tra giao thức/chọn dữ kiện, không phải kết quả end-to-end của daemon. Các phép chấm summary cũ và recall đối chứng vẫn dùng được. Có kiểm tra trích prompt chứa JSON example đầy đủ, kể cả quote escape.
+
+Bản 0.13.0 đã build, core/SQL/eval host pass. Chưa chạy self-test native hay ca 244 tin trên iPhone cho bản này. Cần cài rồi chạy lại cả ca gốc và dữ liệu sạch; chưa khẳng định compact đã pass trên provider. Auto-compact vẫn tắt.
