@@ -161,6 +161,7 @@ Toàn bộ test chạy được trên Linux/macOS/WSL2, không cần Theos hay i
 make env     # dò toolchain, tự tải SQLite nếu thiếu header, sinh .build/env.mk
 make test    # 16 test C++/Python/JS + kiểm tra repo; test thiết bị tự động skip
 make check   # chỉ kiểm tra tính nhất quán Makefile/import/version/asset
+make doctor  # kiểm tra Theos/clang/iOS SDK/ldid trước khi build gói
 ```
 
 Chi tiết môi trường, phạm vi từng test và giới hạn của host: `docs/development.md`.
@@ -170,6 +171,7 @@ Kết quả rà soát mã nguồn 2026-10-30: `docs/code-review-2026-10-30.md`.
 
 ```bash
 export THEOS=/home/luoplayer/theos
+make doctor                  # báo chính xác Theos/SDK/ldid còn thiếu gì
 make package FINALPACKAGE=1
 ```
 

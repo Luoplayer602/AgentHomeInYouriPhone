@@ -51,6 +51,7 @@ Không cần root. Mọi artifact nằm trong `.build/` và `.deps/` (đã gitig
 | `make test` | chạy toàn bộ test host, log từng test ở `.build/tests/*.log` |
 | `./scripts/run-host-tests.sh -v` | như trên + in log của test đạt |
 | `make check` | chạy riêng `scripts/check_sources.py` |
+| `make doctor` | kiểm tra Theos, clang, iOS SDK, `ldid` trước khi build gói |
 | `make clean-host` | xoá `.build/` (giữ `.deps/` để không tải lại SQLite) |
 | `make package FINALPACKAGE=1` | build `.deb` bằng Theos (không dùng trên host thuần) |
 
@@ -110,14 +111,23 @@ ssh -i ~/.ssh/ulp_iphone mobile@PHONE_IP 'perl -' < tests/ipc_smoke.pl
 
 ## 6. Build gói (Theos)
 
+Build gói **không** dùng target host: cần Theos + clang cross-compile + iOS SDK
++ `ldid`. Kiểm tra trước bằng một lệnh:
+
 ```bash
 export THEOS=$HOME/theos          # hoặc đường dẫn Theos của bạn
+make doctor                       # liệt kê chính xác thứ còn thiếu
 make package FINALPACKAGE=1
 ```
 
+`make doctor` kiểm tra: Theos (`makefiles/common.mk`), clang + target aarch64,
+`$THEOS/sdks/iPhoneOS*.sdk`, `ldid`, `dpkg-deb`, `fakeroot` (Linux), `make`,
+`git`, và cấu hình rootless của repo. Thoát mã 1 nếu chưa đủ điều kiện build.
+
 `make` không tham số hoặc `make package` sẽ include Theos như cũ; `make env`,
-`make test`, `make check`, `make clean-host` **không** đụng tới Theos, nên chạy
-được trên Linux CI và trong container.
+`make test`, `make check`, `make doctor`, `make clean-host` **không** đụng tới
+Theos, nên chạy được trên Linux CI và trong container.
+
 
 ## 7. CI
 

@@ -205,6 +205,8 @@ Chỉ thêm hạ tầng phát triển, **không sửa logic sản phẩm**:
   `#import` sai, lệch version `control`/`Info.plist`, asset JSON/plist hỏng.
 - `docs/ci-host-tests.yml`: cấu hình CI 2 job (SQLite hệ thống / amalgamation),
   copy sang `.github/workflows/` để bật.
+- `scripts/check-toolchain.sh` + `make doctor`: kiểm tra Theos, clang/aarch64,
+  iOS SDK, `ldid`, `dpkg-deb` trước khi `make package` (host này không có Theos).
 - `docs/development.md`: hướng dẫn môi trường, ranh giới host, xử lý sự cố.
 - `.gitignore`: thêm `.build/`, `.deps/`, `*.pyc`.
 
