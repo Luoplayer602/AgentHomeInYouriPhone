@@ -1,0 +1,44 @@
+name: host-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Runner Ubuntu có sẵn libsqlite3-dev: kiểm tra nhánh "SQLite hệ thống".
+  host-system-sqlite:
+    name: host (SQLite hệ thống)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Thông tin toolchain
+        run: |
+          g++ --version | head -1
+          python3 --version
+          node --version
+      - name: Chuẩn bị môi trường host
+        run: make env
+      - name: Kiểm tra tính nhất quán của repo
+        run: make check
+      - name: Kiểm thử host
+        run: make test
+
+  # Nhánh không phụ thuộc gói hệ thống: tải SQLite amalgamation đã ghim.
+  host-bundled-sqlite:
+    name: host (SQLite amalgamation)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      AH_FORCE_BUNDLED_SQLITE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Chuẩn bị môi trường host
+        run: make env
+      - name: Kiểm thử host
+        run: make test

@@ -153,6 +153,19 @@ Sau khi cài trên iPhone: kiểm tra chuyển provider, form theo type và Stre
 
 **Chưa triển khai:** scheduler, compact context, memory ngữ nghĩa, phê duyệt quyền tương tác, tool đặc quyền, adapter native Anthropic/Gemini, UI Automation, MCP, Live2D và multi-agent. Runtime dùng allowlist cố định cho tool read-only, chưa phải Risk Engine đầy đủ. Từ 0.7.0 yêu cầu AI và checkpoint chạy trong daemon.
 
+## Môi trường host — rà soát và kiểm thử không cần thiết bị
+
+Toàn bộ test chạy được trên Linux/macOS/WSL2, không cần Theos hay iPhone:
+
+```bash
+make env     # dò toolchain, tự tải SQLite nếu thiếu header, sinh .build/env.mk
+make test    # 16 test C++/Python/JS + kiểm tra repo; test thiết bị tự động skip
+make check   # chỉ kiểm tra tính nhất quán Makefile/import/version/asset
+```
+
+Chi tiết môi trường, phạm vi từng test và giới hạn của host: `docs/development.md`.
+Kết quả rà soát mã nguồn 2026-10-30: `docs/code-review-2026-10-30.md`.
+
 ## Build
 
 ```bash
